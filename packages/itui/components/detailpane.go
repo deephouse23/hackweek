@@ -17,6 +17,8 @@ const (
 	DetailModeOutput
 	DetailModeWelcome
 	DetailModeSecretList
+	DetailModeDiff
+	DetailModePropagation
 )
 
 var (
@@ -50,11 +52,29 @@ var (
 	dSuccessStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#10B981"))
 
+	dChangedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#F59E0B"))
+
 	dTitleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#EAB308")).
 			Bold(true).
 			Padding(0, 0, 1, 0)
 )
+
+// DiffEntry represents a secret that exists in both environments but with different values.
+type DiffEntry struct {
+	Key    string
+	ValueA string
+	ValueB string
+}
+
+// PropagationEntry represents a single environment's state for a given secret key.
+type PropagationEntry struct {
+	Env            string
+	Exists         bool
+	Value          string
+	MatchesCurrent bool
+}
 
 type DetailPaneModel struct {
 	viewport viewport.Model
@@ -79,6 +99,19 @@ type DetailPaneModel struct {
 	// Secret list (AI command result)
 	SecretListTitle string
 	SecretList      []SecretItem
+
+	// Diff view
+	DiffEnvA      string
+	DiffEnvB      string
+	DiffOnlyInA   []string
+	DiffOnlyInB   []string
+	DiffChanged   []DiffEntry
+	DiffSameCount int
+
+	// Propagation view
+	PropagationKey        string
+	PropagationCurrentEnv string
+	PropagationEntries    []PropagationEntry
 }
 
 func NewDetailPane() DetailPaneModel {
@@ -131,6 +164,29 @@ func (m *DetailPaneModel) ResetToWelcome() {
 	m.updateViewportContent()
 }
 
+// SetDiff displays a color-coded diff between two environments.
+func (m *DetailPaneModel) SetDiff(envA, envB string, onlyInA, onlyInB []string, changed []DiffEntry, sameCount int) {
+	m.Mode = DetailModeDiff
+	m.DiffEnvA = envA
+	m.DiffEnvB = envB
+	m.DiffOnlyInA = onlyInA
+	m.DiffOnlyInB = onlyInB
+	m.DiffChanged = changed
+	m.DiffSameCount = sameCount
+	m.ValueRevealed = false
+	m.updateViewportContent()
+}
+
+// SetPropagation displays a secret's presence across all environments.
+func (m *DetailPaneModel) SetPropagation(key string, currentEnv string, entries []PropagationEntry) {
+	m.Mode = DetailModePropagation
+	m.PropagationKey = key
+	m.PropagationCurrentEnv = currentEnv
+	m.PropagationEntries = entries
+	m.ValueRevealed = false
+	m.updateViewportContent()
+}
+
 // CopyableContent returns the most relevant text for clipboard copy.
 // For secrets: the value. For command output: the output content.
 func (m *DetailPaneModel) CopyableContent() string {
@@ -145,13 +201,39 @@ func (m *DetailPaneModel) CopyableContent() string {
 			b.WriteString(fmt.Sprintf("%s=%s\n", s.KeyName, s.Value))
 		}
 		return b.String()
+	case DetailModeDiff:
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Diff: %s vs %s\n", m.DiffEnvA, m.DiffEnvB))
+		for _, k := range m.DiffOnlyInA {
+			b.WriteString(fmt.Sprintf("+ %s (only in %s)\n", k, m.DiffEnvA))
+		}
+		for _, k := range m.DiffOnlyInB {
+			b.WriteString(fmt.Sprintf("- %s (only in %s)\n", k, m.DiffEnvB))
+		}
+		for _, d := range m.DiffChanged {
+			b.WriteString(fmt.Sprintf("~ %s\n", d.Key))
+		}
+		return b.String()
+	case DetailModePropagation:
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Propagation: %s\n", m.PropagationKey))
+		for _, e := range m.PropagationEntries {
+			if !e.Exists {
+				b.WriteString(fmt.Sprintf("  %s: missing\n", e.Env))
+			} else if e.MatchesCurrent {
+				b.WriteString(fmt.Sprintf("  %s: matches\n", e.Env))
+			} else {
+				b.WriteString(fmt.Sprintf("  %s: different\n", e.Env))
+			}
+		}
+		return b.String()
 	default:
 		return ""
 	}
 }
 
 func (m *DetailPaneModel) ToggleReveal() {
-	if m.Mode == DetailModeSecret || m.Mode == DetailModeSecretList {
+	if m.Mode == DetailModeSecret || m.Mode == DetailModeSecretList || m.Mode == DetailModeDiff || m.Mode == DetailModePropagation {
 		m.ValueRevealed = !m.ValueRevealed
 		m.updateViewportContent()
 	}
@@ -169,6 +251,10 @@ func (m *DetailPaneModel) updateViewportContent() {
 		content = m.renderWelcome()
 	case DetailModeSecretList:
 		content = m.renderSecretList()
+	case DetailModeDiff:
+		content = m.renderDiff()
+	case DetailModePropagation:
+		content = m.renderPropagation()
 	}
 
 	m.viewport.SetContent(content)
@@ -292,6 +378,149 @@ func (m *DetailPaneModel) renderOutput() string {
 	} else {
 		b.WriteString(dValueStyle.Render(m.wrapText(m.OutputContent)))
 	}
+
+	return b.String()
+}
+
+func (m *DetailPaneModel) renderDiff() string {
+	var b strings.Builder
+
+	title := fmt.Sprintf("Diff: %s vs %s", m.DiffEnvA, m.DiffEnvB)
+	b.WriteString(dTitleStyle.Render(title))
+	b.WriteString("\n")
+
+	if m.ValueRevealed {
+		b.WriteString(dMaskedStyle.Render("  [press r to hide values]"))
+	} else {
+		b.WriteString(dMaskedStyle.Render("  [press r to reveal values]"))
+	}
+	b.WriteString("\n\n")
+
+	total := len(m.DiffOnlyInA) + len(m.DiffOnlyInB) + len(m.DiffChanged)
+	if total == 0 {
+		b.WriteString(dSuccessStyle.Render("Environments are identical"))
+		b.WriteString(fmt.Sprintf(" (%d secrets)\n", m.DiffSameCount))
+		return b.String()
+	}
+
+	summaryLine := fmt.Sprintf("%d only in %s, %d only in %s, %d different, %d identical",
+		len(m.DiffOnlyInA), m.DiffEnvA,
+		len(m.DiffOnlyInB), m.DiffEnvB,
+		len(m.DiffChanged), m.DiffSameCount)
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(summaryLine))
+	b.WriteString("\n\n")
+
+	if len(m.DiffOnlyInA) > 0 {
+		header := fmt.Sprintf("Only in %s (%d):", m.DiffEnvA, len(m.DiffOnlyInA))
+		b.WriteString(dSuccessStyle.Render(header))
+		b.WriteString("\n")
+		for _, key := range m.DiffOnlyInA {
+			b.WriteString(dSuccessStyle.Render("  + " + key))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.DiffOnlyInB) > 0 {
+		header := fmt.Sprintf("Only in %s (%d):", m.DiffEnvB, len(m.DiffOnlyInB))
+		b.WriteString(dErrorStyle.Render(header))
+		b.WriteString("\n")
+		for _, key := range m.DiffOnlyInB {
+			b.WriteString(dErrorStyle.Render("  - " + key))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	if len(m.DiffChanged) > 0 {
+		header := fmt.Sprintf("Different values (%d):", len(m.DiffChanged))
+		b.WriteString(dChangedStyle.Render(header))
+		b.WriteString("\n")
+		for _, d := range m.DiffChanged {
+			b.WriteString(dChangedStyle.Render("  ~ " + d.Key))
+			b.WriteString("\n")
+			if m.ValueRevealed {
+				b.WriteString(fmt.Sprintf("    %s: %s\n", m.DiffEnvA, dValueStyle.Render(m.wrapText(d.ValueA))))
+				b.WriteString(fmt.Sprintf("    %s: %s\n", m.DiffEnvB, dValueStyle.Render(m.wrapText(d.ValueB))))
+			} else {
+				b.WriteString(fmt.Sprintf("    %s: %s\n", m.DiffEnvA, dMaskedStyle.Render("••••••••")))
+				b.WriteString(fmt.Sprintf("    %s: %s\n", m.DiffEnvB, dMaskedStyle.Render("••••••••")))
+			}
+		}
+	}
+
+	return b.String()
+}
+
+func (m *DetailPaneModel) renderPropagation() string {
+	var b strings.Builder
+
+	b.WriteString(dTitleStyle.Render("Secret Propagation: " + m.PropagationKey))
+	b.WriteString("\n")
+
+	if m.ValueRevealed {
+		b.WriteString(dMaskedStyle.Render("  [press r to hide values]"))
+	} else {
+		b.WriteString(dMaskedStyle.Render("  [press r to reveal values]"))
+	}
+	b.WriteString("\n\n")
+
+	// Find max env name length for alignment
+	maxEnvLen := 0
+	for _, e := range m.PropagationEntries {
+		if len(e.Env) > maxEnvLen {
+			maxEnvLen = len(e.Env)
+		}
+	}
+
+	for _, entry := range m.PropagationEntries {
+		envPadded := entry.Env
+		if len(envPadded) < maxEnvLen {
+			envPadded += strings.Repeat(" ", maxEnvLen-len(envPadded))
+		}
+
+		marker := "  "
+		if entry.Env == m.PropagationCurrentEnv {
+			marker = "* "
+		}
+
+		var statusIcon, valueDisplay string
+		if !entry.Exists {
+			statusIcon = dErrorStyle.Render("X")
+			valueDisplay = dErrorStyle.Render("(not set)")
+		} else if entry.MatchesCurrent {
+			statusIcon = dSuccessStyle.Render("=")
+			if m.ValueRevealed {
+				valueDisplay = dValueStyle.Render(m.wrapText(entry.Value))
+			} else {
+				valueDisplay = dMaskedStyle.Render("••••••••")
+			}
+		} else {
+			statusIcon = dChangedStyle.Render("~")
+			if m.ValueRevealed {
+				valueDisplay = dChangedStyle.Render(m.wrapText(entry.Value))
+			} else {
+				valueDisplay = dMaskedStyle.Render("••••••••")
+			}
+		}
+
+		b.WriteString(fmt.Sprintf("%s%s  %s  %s\n",
+			marker,
+			dKeyStyle.Render(envPadded),
+			statusIcon,
+			valueDisplay,
+		))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
+		"Legend: "))
+	b.WriteString(dSuccessStyle.Render("= matches") + "  ")
+	b.WriteString(dChangedStyle.Render("~ different") + "  ")
+	b.WriteString(dErrorStyle.Render("X missing"))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
+		"* = current environment"))
 
 	return b.String()
 }

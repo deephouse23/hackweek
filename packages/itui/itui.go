@@ -33,6 +33,21 @@ type aiResponseMsg struct {
 	err      error
 }
 
+type diffLoadedMsg struct {
+	envA, envB       string
+	onlyInA, onlyInB []string
+	changed          []components.DiffEntry
+	sameCount        int
+	err              error
+}
+
+type propagationLoadedMsg struct {
+	key        string
+	currentEnv string
+	entries    []components.PropagationEntry
+	err        error
+}
+
 // Model is the top-level Bubble Tea model
 type Model struct {
 	// Components
@@ -124,6 +139,104 @@ func (m Model) loadSecrets() tea.Msg {
 	// Folder fetch is non-fatal — just show no folders if it fails
 	folders, _ := m.executor.FetchFolders(m.ctx.Environment, m.ctx.Path)
 	return secretsLoadedMsg{secrets: secrets, folders: folders}
+}
+
+func (m Model) loadDiff(targetEnv string) tea.Cmd {
+	executor := m.executor
+	currentEnv := m.ctx.Environment
+	currentPath := m.ctx.Path
+	return func() tea.Msg {
+		secretsA, errA := executor.FetchSecrets(currentEnv, currentPath)
+		if errA != nil {
+			return diffLoadedMsg{err: fmt.Errorf("failed to fetch %s: %w", currentEnv, errA)}
+		}
+		secretsB, errB := executor.FetchSecrets(targetEnv, currentPath)
+		if errB != nil {
+			return diffLoadedMsg{err: fmt.Errorf("failed to fetch %s: %w", targetEnv, errB)}
+		}
+
+		mapA := make(map[string]string, len(secretsA))
+		for _, s := range secretsA {
+			mapA[s.Key] = s.Value
+		}
+		mapB := make(map[string]string, len(secretsB))
+		for _, s := range secretsB {
+			mapB[s.Key] = s.Value
+		}
+
+		var onlyInA, onlyInB []string
+		var changed []components.DiffEntry
+		sameCount := 0
+
+		for _, s := range secretsA {
+			valB, exists := mapB[s.Key]
+			if !exists {
+				onlyInA = append(onlyInA, s.Key)
+			} else if s.Value != valB {
+				changed = append(changed, components.DiffEntry{Key: s.Key, ValueA: s.Value, ValueB: valB})
+			} else {
+				sameCount++
+			}
+		}
+		for _, s := range secretsB {
+			if _, exists := mapA[s.Key]; !exists {
+				onlyInB = append(onlyInB, s.Key)
+			}
+		}
+
+		return diffLoadedMsg{
+			envA: currentEnv, envB: targetEnv,
+			onlyInA: onlyInA, onlyInB: onlyInB,
+			changed: changed, sameCount: sameCount,
+		}
+	}
+}
+
+func (m Model) loadPropagation(secretKey string) tea.Cmd {
+	executor := m.executor
+	currentEnv := m.ctx.Environment
+	envs := m.ctx.Environments
+	currentPath := m.ctx.Path
+
+	// Find the current value for comparison
+	var currentValue string
+	for _, s := range m.secrets {
+		if s.Key == secretKey {
+			currentValue = s.Value
+			break
+		}
+	}
+
+	return func() tea.Msg {
+		entries := make([]components.PropagationEntry, 0, len(envs))
+
+		for _, env := range envs {
+			entry := components.PropagationEntry{Env: env}
+
+			secrets, err := executor.FetchSecrets(env, currentPath)
+			if err != nil {
+				entry.Exists = false
+				entries = append(entries, entry)
+				continue
+			}
+
+			for _, s := range secrets {
+				if s.Key == secretKey {
+					entry.Exists = true
+					entry.Value = s.Value
+					entry.MatchesCurrent = (s.Value == currentValue)
+					break
+				}
+			}
+			entries = append(entries, entry)
+		}
+
+		return propagationLoadedMsg{
+			key:        secretKey,
+			currentEnv: currentEnv,
+			entries:    entries,
+		}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -288,6 +401,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateContextBar()
 		return m, m.loadSecrets
 
+	case components.DiffEnvSelectedMsg:
+		m.detailPane.SetOutput("Loading...", fmt.Sprintf("Comparing %s with %s...", m.ctx.Environment, msg.Environment), false)
+		return m, m.loadDiff(msg.Environment)
+
+	case diffLoadedMsg:
+		if msg.err != nil {
+			m.detailPane.SetOutput("Diff Error", msg.err.Error(), true)
+		} else {
+			m.detailPane.SetDiff(msg.envA, msg.envB, msg.onlyInA, msg.onlyInB, msg.changed, msg.sameCount)
+		}
+		return m, nil
+
+	case propagationLoadedMsg:
+		if msg.err != nil {
+			m.detailPane.SetOutput("Propagation Error", msg.err.Error(), true)
+		} else {
+			m.detailPane.SetPropagation(msg.key, msg.currentEnv, msg.entries)
+		}
+		return m, nil
+
 	case components.ConfirmYesMsg:
 		return m, m.executeCommand(msg.Command)
 
@@ -393,6 +526,15 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detailPane.ToggleReveal()
 	case "R":
 		return m, m.loadContext
+	case "D":
+		m.envPicker.ShowForDiff(m.ctx.Environment, m.ctx.Environments)
+	case "p":
+		if m.focusedPane != PanePrompt {
+			if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
+				m.detailPane.SetOutput("Loading...", fmt.Sprintf("Fetching '%s' across all environments...", item.KeyName), false)
+				return m, m.loadPropagation(item.KeyName)
+			}
+		}
 	case "ctrl+k":
 		// Open command palette with current secrets, envs, recents, pins
 		secretKeys := make([]string, 0, len(m.secrets))
@@ -615,6 +757,13 @@ func (m *Model) handlePaletteResult(msg components.PaletteResultMsg) (tea.Model,
 		m.ctx.Path = msg.Data
 		m.updateContextBar()
 		return m, m.loadSecrets
+	case components.PaletteDiffEnvs:
+		m.envPicker.ShowForDiff(m.ctx.Environment, m.ctx.Environments)
+	case components.PalettePropagation:
+		if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
+			m.detailPane.SetOutput("Loading...", fmt.Sprintf("Fetching '%s' across all environments...", item.KeyName), false)
+			return m, m.loadPropagation(item.KeyName)
+		}
 	}
 	return m, nil
 }

@@ -22,6 +22,8 @@ const (
 	PaletteCreateSecret
 	PaletteCreateSecretInEnv
 	PaletteNavigatePath
+	PaletteDiffEnvs
+	PalettePropagation
 )
 
 // PaletteResultMsg is emitted when an item is selected in the command palette
@@ -140,6 +142,16 @@ func (m *CmdPaletteModel) Show(ctx PaletteContext) {
 			})
 		}
 	}
+
+	// Diff and propagation actions
+	m.items = append(m.items, PaletteItem{
+		Label: "Compare secrets (diff environments)", Category: "action",
+		Action: PaletteDiffEnvs,
+	})
+	m.items = append(m.items, PaletteItem{
+		Label: "View secret propagation across envs", Category: "action",
+		Action: PalettePropagation,
+	})
 
 	// Pinned secrets
 	for _, pin := range ctx.Pins {

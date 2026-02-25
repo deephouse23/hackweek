@@ -38,11 +38,17 @@ type EnvSelectedMsg struct {
 	Environment string
 }
 
+// DiffEnvSelectedMsg is sent when a target environment is selected for diff comparison
+type DiffEnvSelectedMsg struct {
+	Environment string
+}
+
 type EnvPickerModel struct {
 	Visible      bool
 	Environments []string
 	Current      string
 	cursor       int
+	Purpose      string // "" = normal env switch, "diff" = diff target selection
 }
 
 func NewEnvPicker() EnvPickerModel {
@@ -66,8 +72,15 @@ func (m *EnvPickerModel) Show(current string, envs []string) {
 	}
 }
 
+// ShowForDiff opens the picker for selecting a diff target environment.
+func (m *EnvPickerModel) ShowForDiff(current string, envs []string) {
+	m.Purpose = "diff"
+	m.Show(current, envs)
+}
+
 func (m *EnvPickerModel) Hide() {
 	m.Visible = false
+	m.Purpose = ""
 }
 
 func (m EnvPickerModel) Update(msg tea.Msg) (EnvPickerModel, tea.Cmd) {
@@ -89,9 +102,14 @@ func (m EnvPickerModel) Update(msg tea.Msg) (EnvPickerModel, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 			selected := m.Environments[m.cursor]
 			m.Visible = false
+			if m.Purpose == "diff" {
+				m.Purpose = ""
+				return m, func() tea.Msg { return DiffEnvSelectedMsg{Environment: selected} }
+			}
 			return m, func() tea.Msg { return EnvSelectedMsg{Environment: selected} }
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
 			m.Visible = false
+			m.Purpose = ""
 		}
 	}
 
@@ -103,7 +121,11 @@ func (m EnvPickerModel) View() string {
 		return ""
 	}
 
-	content := envPickerTitle.Render("Switch Environment") + "\n\n"
+	titleText := "Switch Environment"
+	if m.Purpose == "diff" {
+		titleText = "Compare with..."
+	}
+	content := envPickerTitle.Render(titleText) + "\n\n"
 
 	for i, env := range m.Environments {
 		marker := "  "
