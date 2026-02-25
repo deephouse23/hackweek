@@ -108,6 +108,8 @@ func helpContent() string {
 				{"e", "Switch environment"},
 				{"/", "Search / filter secrets"},
 				{"R", "Refresh secrets"},
+				{"D", "Compare environments (diff)"},
+				{"p", "View propagation across envs"},
 			},
 		},
 		{

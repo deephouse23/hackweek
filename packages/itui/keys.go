@@ -24,6 +24,8 @@ type keyMap struct {
 	CopyToClip    key.Binding
 	CopyDeepLink  key.Binding
 	PasteAnalyze  key.Binding
+	DiffSecrets   key.Binding
+	Propagation   key.Binding
 }
 
 var keys = keyMap{
@@ -110,5 +112,13 @@ var keys = keyMap{
 	PasteAnalyze: key.NewBinding(
 		key.WithKeys("ctrl+v"),
 		key.WithHelp("ctrl+v", "paste & analyze"),
+	),
+	DiffSecrets: key.NewBinding(
+		key.WithKeys("D"),
+		key.WithHelp("D", "diff environments"),
+	),
+	Propagation: key.NewBinding(
+		key.WithKeys("p"),
+		key.WithHelp("p", "propagation across envs"),
 	),
 }
