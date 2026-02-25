@@ -150,6 +150,35 @@ func (e *Executor) FetchSecrets(env, path string) ([]Secret, error) {
 	return secrets, nil
 }
 
+// FetchFolders retrieves folders for the given environment and path
+func (e *Executor) FetchFolders(env, path string) ([]FolderInfo, error) {
+	args := []string{"secrets", "folders", "get", "--output=json", "--env=" + env}
+	if path != "" && path != "/" {
+		args = append(args, "--path="+path)
+	}
+
+	result := e.Run(args...)
+	if result.Error != nil {
+		errMsg := result.Stderr
+		if errMsg == "" {
+			errMsg = result.Error.Error()
+		}
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+
+	stdout := strings.TrimSpace(result.Stdout)
+	if stdout == "" || stdout == "null" {
+		return []FolderInfo{}, nil
+	}
+
+	var folders []FolderInfo
+	if err := json.Unmarshal([]byte(stdout), &folders); err != nil {
+		return nil, fmt.Errorf("failed to parse folders JSON: %w", err)
+	}
+
+	return folders, nil
+}
+
 // CheckAuth checks if the user is logged in
 func (e *Executor) CheckAuth() (email string, loggedIn bool) {
 	result := e.Run("user")

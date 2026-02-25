@@ -85,6 +85,13 @@ type ProjectInfo struct {
 	OrganizationId string `json:"orgId"`
 }
 
+// FolderInfo represents a folder from infisical secrets folders get --output=json
+type FolderInfo struct {
+	Name string `json:"folderName"`
+	Path string `json:"folderPath"`
+	ID   string `json:"folderId"`
+}
+
 // AIResponse is the structured response from the AI model
 type AIResponse struct {
 	Command              string `json:"command"`
