@@ -13,7 +13,6 @@ var allowedCommands = map[string]bool{
 	"secrets delete":     true,
 	"secrets folders":    true,
 	"secrets versions":   true,
-	"secrets diff":       true,
 	"export":             true,
 	"run":                true,
 	"scan":               true,

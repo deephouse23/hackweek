@@ -34,10 +34,11 @@ type aiResponseMsg struct {
 }
 
 type diffLoadedMsg struct {
+	key              string
 	envA, envB       string
-	onlyInA, onlyInB []string
-	changed          []components.DiffEntry
-	sameCount        int
+	valueA, valueB   string
+	missingA         bool
+	missingB         bool
 	err              error
 }
 
@@ -46,6 +47,24 @@ type propagationLoadedMsg struct {
 	currentEnv string
 	entries    []components.PropagationEntry
 	err        error
+}
+
+type propagationCopyData struct {
+	key       string
+	value     string
+	targetEnv string
+}
+
+type propagationCopyDoneMsg struct {
+	secretKey string
+	err       error
+}
+
+type diffCopyDoneMsg struct {
+	secretKey string
+	envA      string
+	envB      string
+	err       error
 }
 
 // Model is the top-level Bubble Tea model
@@ -74,6 +93,9 @@ type Model struct {
 	valueCache      map[string]string // placeholder → real value, for sanitize/hydrate
 	persistentState PersistentState
 	pendingAction   *PendingAction // deferred action to run after secrets reload
+	diffSecretKey          string               // key of the secret currently being diffed
+	pendingPropagationCopy *propagationCopyData // pending propagation copy awaiting confirmation
+	pendingDiffCopy        *propagationCopyData // pending diff copy awaiting confirmation
 
 	// Window
 	windowWidth  int
@@ -141,53 +163,46 @@ func (m Model) loadSecrets() tea.Msg {
 	return secretsLoadedMsg{secrets: secrets, folders: folders}
 }
 
-func (m Model) loadDiff(targetEnv string) tea.Cmd {
+func (m Model) loadDiff(secretKey, targetEnv string) tea.Cmd {
 	executor := m.executor
 	currentEnv := m.ctx.Environment
 	currentPath := m.ctx.Path
-	return func() tea.Msg {
-		secretsA, errA := executor.FetchSecrets(currentEnv, currentPath)
-		if errA != nil {
-			return diffLoadedMsg{err: fmt.Errorf("failed to fetch %s: %w", currentEnv, errA)}
+
+	// Look up the value in the already-loaded current env secrets
+	var valueA string
+	missingA := true
+	for _, s := range m.secrets {
+		if s.Key == secretKey {
+			valueA = s.Value
+			missingA = false
+			break
 		}
+	}
+
+	return func() tea.Msg {
 		secretsB, errB := executor.FetchSecrets(targetEnv, currentPath)
 		if errB != nil {
 			return diffLoadedMsg{err: fmt.Errorf("failed to fetch %s: %w", targetEnv, errB)}
 		}
 
-		mapA := make(map[string]string, len(secretsA))
-		for _, s := range secretsA {
-			mapA[s.Key] = s.Value
-		}
-		mapB := make(map[string]string, len(secretsB))
+		var valueB string
+		missingB := true
 		for _, s := range secretsB {
-			mapB[s.Key] = s.Value
-		}
-
-		var onlyInA, onlyInB []string
-		var changed []components.DiffEntry
-		sameCount := 0
-
-		for _, s := range secretsA {
-			valB, exists := mapB[s.Key]
-			if !exists {
-				onlyInA = append(onlyInA, s.Key)
-			} else if s.Value != valB {
-				changed = append(changed, components.DiffEntry{Key: s.Key, ValueA: s.Value, ValueB: valB})
-			} else {
-				sameCount++
-			}
-		}
-		for _, s := range secretsB {
-			if _, exists := mapA[s.Key]; !exists {
-				onlyInB = append(onlyInB, s.Key)
+			if s.Key == secretKey {
+				valueB = s.Value
+				missingB = false
+				break
 			}
 		}
 
 		return diffLoadedMsg{
-			envA: currentEnv, envB: targetEnv,
-			onlyInA: onlyInA, onlyInB: onlyInB,
-			changed: changed, sameCount: sameCount,
+			key:      secretKey,
+			envA:     currentEnv,
+			envB:     targetEnv,
+			valueA:   valueA,
+			valueB:   valueB,
+			missingA: missingA,
+			missingB: missingB,
 		}
 	}
 }
@@ -402,14 +417,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadSecrets
 
 	case components.DiffEnvSelectedMsg:
-		m.detailPane.SetOutput("Loading...", fmt.Sprintf("Comparing %s with %s...", m.ctx.Environment, msg.Environment), false)
-		return m, m.loadDiff(msg.Environment)
+		m.detailPane.SetOutput("Loading...", fmt.Sprintf("Comparing %s in %s vs %s...", m.diffSecretKey, m.ctx.Environment, msg.Environment), false)
+		return m, m.loadDiff(m.diffSecretKey, msg.Environment)
 
 	case diffLoadedMsg:
 		if msg.err != nil {
 			m.detailPane.SetOutput("Diff Error", msg.err.Error(), true)
 		} else {
-			m.detailPane.SetDiff(msg.envA, msg.envB, msg.onlyInA, msg.onlyInB, msg.changed, msg.sameCount)
+			m.detailPane.SetSecretDiff(msg.key, msg.envA, msg.envB, msg.valueA, msg.valueB, msg.missingA, msg.missingB)
 		}
 		return m, nil
 
@@ -419,9 +434,95 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.detailPane.SetPropagation(msg.key, msg.currentEnv, msg.entries)
 		}
+
+	case components.PropagationCopyRequestMsg:
+		key := m.detailPane.PropagationKey
+		var value string
+		for _, s := range m.secrets {
+			if s.Key == key {
+				value = s.Value
+				break
+			}
+		}
+		m.pendingPropagationCopy = &propagationCopyData{key: key, value: value, targetEnv: msg.TargetEnv}
+		isProd := strings.EqualFold(msg.TargetEnv, "prod") || strings.EqualFold(msg.TargetEnv, "production")
+		m.confirmDialog.Show(
+			fmt.Sprintf("infisical secrets set %s=<value> --env=%s", key, msg.TargetEnv),
+			fmt.Sprintf("Copy %s from %s → %s", key, m.ctx.Environment, msg.TargetEnv),
+			false, isProd,
+		)
+		m.mode = ModeConfirmation
 		return m, nil
 
+	case propagationCopyDoneMsg:
+		if msg.err != nil {
+			m.detailPane.SetOutput("Copy Failed", msg.err.Error(), true)
+			return m, nil
+		}
+		return m, m.loadPropagation(msg.secretKey)
+
+	case components.DiffCopyRequestMsg:
+		m.pendingDiffCopy = &propagationCopyData{key: msg.Key, value: msg.Value, targetEnv: msg.TargetEnv}
+		isProd := strings.EqualFold(msg.TargetEnv, "prod") || strings.EqualFold(msg.TargetEnv, "production")
+		m.confirmDialog.Show(
+			fmt.Sprintf("infisical secrets set %s=<value> --env=%s", msg.Key, msg.TargetEnv),
+			fmt.Sprintf("Copy %s → %s", msg.Key, msg.TargetEnv),
+			false, isProd,
+		)
+		m.mode = ModeConfirmation
+		return m, nil
+
+	case diffCopyDoneMsg:
+		if msg.err != nil {
+			m.detailPane.SetOutput("Copy Failed", msg.err.Error(), true)
+			return m, nil
+		}
+		// Re-run the same diff so the table reflects the updated values.
+		// envA is always the current env; envB is always the target env.
+		_ = msg.envA
+		return m, m.loadDiff(msg.secretKey, msg.envB)
+
 	case components.ConfirmYesMsg:
+		if m.pendingPropagationCopy != nil {
+			cp := m.pendingPropagationCopy
+			m.pendingPropagationCopy = nil
+			executor := m.executor
+			return m, func() tea.Msg {
+				result := executor.RunSecretSet(
+					[]string{cp.key + "=" + cp.value},
+					[]string{"--env=" + cp.targetEnv},
+				)
+				if result.Error != nil {
+					errMsg := result.Stderr
+					if errMsg == "" {
+						errMsg = result.Error.Error()
+					}
+					return propagationCopyDoneMsg{secretKey: cp.key, err: fmt.Errorf("%s", errMsg)}
+				}
+				return propagationCopyDoneMsg{secretKey: cp.key}
+			}
+		}
+		if m.pendingDiffCopy != nil {
+			cp := m.pendingDiffCopy
+			envA := m.detailPane.DiffEnvA
+			envB := m.detailPane.DiffEnvB
+			m.pendingDiffCopy = nil
+			executor := m.executor
+			return m, func() tea.Msg {
+				result := executor.RunSecretSet(
+					[]string{cp.key + "=" + cp.value},
+					[]string{"--env=" + cp.targetEnv},
+				)
+				if result.Error != nil {
+					errMsg := result.Stderr
+					if errMsg == "" {
+						errMsg = result.Error.Error()
+					}
+					return diffCopyDoneMsg{secretKey: cp.key, envA: envA, envB: envB, err: fmt.Errorf("%s", errMsg)}
+				}
+				return diffCopyDoneMsg{secretKey: cp.key, envA: envA, envB: envB}
+			}
+		}
 		return m, m.executeCommand(msg.Command)
 
 	case components.ConfirmNoMsg:
@@ -516,7 +617,7 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.envPicker.Show(m.ctx.Environment, m.ctx.Environments)
 	case "n":
 		m.secretForm.Show()
-	case "d":
+	case "X":
 		if item, ok := m.secretBrowser.SelectedItem(); ok {
 			isProd := strings.EqualFold(m.ctx.Environment, "prod") || strings.EqualFold(m.ctx.Environment, "production")
 			cmd := fmt.Sprintf("infisical secrets delete %s --env=%s --path=%s --type=shared", item.KeyName, m.ctx.Environment, m.ctx.Path)
@@ -526,8 +627,11 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detailPane.ToggleReveal()
 	case "R":
 		return m, m.loadContext
-	case "D":
-		m.envPicker.ShowForDiff(m.ctx.Environment, m.ctx.Environments)
+	case "d":
+		if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
+			m.diffSecretKey = item.KeyName
+			m.envPicker.ShowForDiff(m.ctx.Environment, m.ctx.Environments)
+		}
 	case "p":
 		if m.focusedPane != PanePrompt {
 			if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
@@ -758,7 +862,10 @@ func (m *Model) handlePaletteResult(msg components.PaletteResultMsg) (tea.Model,
 		m.updateContextBar()
 		return m, m.loadSecrets
 	case components.PaletteDiffEnvs:
-		m.envPicker.ShowForDiff(m.ctx.Environment, m.ctx.Environments)
+		if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
+			m.diffSecretKey = item.KeyName
+			m.envPicker.ShowForDiff(m.ctx.Environment, m.ctx.Environments)
+		}
 	case components.PalettePropagation:
 		if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
 			m.detailPane.SetOutput("Loading...", fmt.Sprintf("Fetching '%s' across all environments...", item.KeyName), false)

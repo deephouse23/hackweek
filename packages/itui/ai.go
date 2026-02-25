@@ -173,9 +173,11 @@ You MUST respond with ONLY a JSON object (no markdown, no explanation outside th
 - infisical secrets set KEY=VALUE --env=ENV                   # Create/update secret
 - infisical secrets delete NAME --env=ENV --type=shared       # Delete secret
 
-### Secret History & Comparison
+### Secret History
 - infisical secrets versions SECRET_NAME --env=ENV            # Show version history of a secret
-- infisical secrets diff --env-a=ENV_A --env-b=ENV_B          # Compare secrets between two environments
+
+### Environment Comparison
+- To compare secrets between two environments, tell the user to press D in the secret browser or use "Compare secrets" in the command palette (ctrl+k). Do not generate a CLI command for this — it is handled natively by the TUI.
 
 ### Export
 - infisical export --env=ENV --format=json|dotenv|yaml|csv    # Export in various formats
