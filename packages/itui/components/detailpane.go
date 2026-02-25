@@ -299,9 +299,7 @@ func (m *DetailPaneModel) renderOutput() string {
 func (m *DetailPaneModel) renderWelcome() string {
 	var b strings.Builder
 
-	b.WriteString(dTitleStyle.Render("Welcome to ITUI"))
-	b.WriteString("\n\n")
-	b.WriteString(dValueStyle.Render("Infisical Terminal UI"))
+	b.WriteString(dTitleStyle.Render("Welcome to Infisical TUI"))
 	b.WriteString("\n\n")
 	b.WriteString(dLabelStyle.Render("Get started:"))
 	b.WriteString("\n")
