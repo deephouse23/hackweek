@@ -64,12 +64,12 @@ var errorPatterns = []errorPattern{
 var (
 	pasteStyle = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
-			BorderForeground(lipgloss.Color("#7C3AED")).
+			BorderForeground(lipgloss.Color("#EAB308")).
 			Padding(1, 2).
 			Width(60)
 
 	pasteTitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7C3AED")).
+			Foreground(lipgloss.Color("#EAB308")).
 			Bold(true)
 
 	pasteDiagStyle = lipgloss.NewStyle().

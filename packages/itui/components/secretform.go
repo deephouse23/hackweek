@@ -12,12 +12,12 @@ import (
 var (
 	formStyle = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
-			BorderForeground(lipgloss.Color("#7C3AED")).
+			BorderForeground(lipgloss.Color("#EAB308")).
 			Padding(1, 2).
 			Width(60)
 
 	formTitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7C3AED")).
+			Foreground(lipgloss.Color("#EAB308")).
 			Bold(true)
 
 	formLabelStyle = lipgloss.NewStyle().

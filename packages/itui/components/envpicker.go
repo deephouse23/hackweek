@@ -11,12 +11,12 @@ import (
 var (
 	envPickerStyle = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
-			BorderForeground(lipgloss.Color("#7C3AED")).
+			BorderForeground(lipgloss.Color("#EAB308")).
 			Padding(1, 2).
 			Width(40)
 
 	envPickerTitle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7C3AED")).
+			Foreground(lipgloss.Color("#EAB308")).
 			Bold(true)
 
 	envItemStyle = lipgloss.NewStyle().
@@ -25,7 +25,7 @@ var (
 
 	envSelectedStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#F9FAFB")).
-				Background(lipgloss.Color("#8B5CF6")).
+				Background(lipgloss.Color("#FACC15")).
 				Bold(true).
 				Padding(0, 1)
 

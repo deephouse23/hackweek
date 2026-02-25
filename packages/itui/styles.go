@@ -4,7 +4,7 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	// Colors
-	primaryColor   = lipgloss.Color("#7C3AED") // purple
+	primaryColor   = lipgloss.Color("#EAB308") // yellow
 	accentColor    = lipgloss.Color("#10B981") // green
 	warningColor   = lipgloss.Color("#F59E0B") // yellow
 	dangerColor    = lipgloss.Color("#EF4444") // red
@@ -13,7 +13,7 @@ var (
 	bgColor        = lipgloss.Color("#111827") // dark bg
 	surfaceColor   = lipgloss.Color("#1F2937") // slightly lighter bg
 	borderColor    = lipgloss.Color("#374151") // border gray
-	highlightColor = lipgloss.Color("#8B5CF6") // lighter purple
+	highlightColor = lipgloss.Color("#FACC15") // lighter yellow
 
 	// Context bar
 	contextBarStyle = lipgloss.NewStyle().
@@ -29,7 +29,7 @@ var (
 				Padding(0, 1)
 
 	contextLabelStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#C4B5FD")).
+				Foreground(lipgloss.Color("#FDE68A")).
 				Bold(false)
 
 	// Secret browser pane

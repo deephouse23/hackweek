@@ -74,7 +74,7 @@ func NewPromptBar() PromptBarModel {
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7C3AED"))
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308"))
 
 	return PromptBarModel{
 		textInput: ti,

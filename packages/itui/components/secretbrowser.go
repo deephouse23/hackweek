@@ -19,12 +19,12 @@ var (
 
 	browserActiveBorder = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#7C3AED")).
+				BorderForeground(lipgloss.Color("#EAB308")).
 				Padding(0, 1)
 
 	selectedItemStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#F9FAFB")).
-				Background(lipgloss.Color("#8B5CF6")).
+				Background(lipgloss.Color("#FACC15")).
 				Bold(true).
 				Padding(0, 1)
 
@@ -106,7 +106,7 @@ func NewSecretBrowser() SecretBrowserModel {
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(true)
 	l.Styles.Title = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#EAB308")).
 		Bold(true).
 		Padding(0, 0, 1, 0)
 
@@ -266,7 +266,7 @@ func (m SecretBrowserModel) buildFilterHints() string {
 	}
 
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Italic(true)
-	actionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7C3AED")).Bold(true)
+	actionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308")).Bold(true)
 
 	var hints []string
 
@@ -295,7 +295,7 @@ func (m SecretBrowserModel) buildFilterHints() string {
 
 // buildBreadcrumb renders a styled path breadcrumb like "/ > config > api"
 func (m SecretBrowserModel) buildBreadcrumb() string {
-	pathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7C3AED"))
+	pathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308"))
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 
 	parts := strings.Split(strings.Trim(m.CurrentPath, "/"), "/")

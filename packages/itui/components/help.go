@@ -12,12 +12,12 @@ import (
 var (
 	helpModalStyle = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
-			BorderForeground(lipgloss.Color("#7C3AED")).
+			BorderForeground(lipgloss.Color("#EAB308")).
 			Padding(1, 2).
 			Width(60)
 
 	helpTitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7C3AED")).
+			Foreground(lipgloss.Color("#EAB308")).
 			Bold(true)
 
 	helpKeyBind = lipgloss.NewStyle().
@@ -153,7 +153,7 @@ func helpContent() string {
 		"export all dev secrets as .env",
 	}
 	for _, ex := range examples {
-		content += fmt.Sprintf("  %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#C4B5FD")).Italic(true).Render("\""+ex+"\""))
+		content += fmt.Sprintf("  %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#FDE68A")).Italic(true).Render("\""+ex+"\""))
 	}
 
 	return content
