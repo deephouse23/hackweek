@@ -70,8 +70,8 @@ var keys = keyMap{
 		key.WithHelp("n", "new secret"),
 	),
 	DeleteSecret: key.NewBinding(
-		key.WithKeys("d"),
-		key.WithHelp("d", "delete secret"),
+		key.WithKeys("X"),
+		key.WithHelp("X", "delete secret"),
 	),
 	RevealValue: key.NewBinding(
 		key.WithKeys("r"),
@@ -114,8 +114,8 @@ var keys = keyMap{
 		key.WithHelp("ctrl+v", "paste & analyze"),
 	),
 	DiffSecrets: key.NewBinding(
-		key.WithKeys("D"),
-		key.WithHelp("D", "diff environments"),
+		key.WithKeys("d"),
+		key.WithHelp("d", "compare secret across envs"),
 	),
 	Propagation: key.NewBinding(
 		key.WithKeys("p"),

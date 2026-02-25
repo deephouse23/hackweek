@@ -104,11 +104,11 @@ func helpContent() string {
 			binds: []struct{ key, desc string }{
 				{"r", "Reveal / mask secret value"},
 				{"n", "Create new secret"},
-				{"d", "Delete selected secret"},
+				{"X", "Delete selected secret"},
 				{"e", "Switch environment"},
 				{"/", "Search / filter secrets"},
 				{"R", "Refresh secrets"},
-				{"D", "Compare environments (diff)"},
+				{"d", "Compare selected secret across envs"},
 				{"p", "View propagation across envs"},
 			},
 		},
