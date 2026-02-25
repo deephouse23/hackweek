@@ -71,6 +71,20 @@ type PendingAction struct {
 	Type PendingActionType
 }
 
+// EnvironmentInfo represents an accessible environment from the API
+type EnvironmentInfo struct {
+	Name          string `json:"name"`
+	Slug          string `json:"slug"`
+	IsWriteDenied bool   `json:"isWriteDenied"`
+}
+
+// ProjectInfo represents a project/workspace from the API
+type ProjectInfo struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	OrganizationId string `json:"orgId"`
+}
+
 // AIResponse is the structured response from the AI model
 type AIResponse struct {
 	Command              string `json:"command"`

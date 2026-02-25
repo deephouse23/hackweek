@@ -799,6 +799,282 @@ func addHash(input string) string {
 	return strings.Join(lines, "\n")
 }
 
+var secretsVersionsCmd = &cobra.Command{
+	Use:     "versions [secret-name]",
+	Short:   "Show version history of a secret",
+	Example: "infisical secrets versions DATABASE_URL --env=dev",
+	Args:    cobra.ExactArgs(1),
+	PreRun: func(cmd *cobra.Command, args []string) {
+		util.RequireLogin()
+	},
+	Run: func(cmd *cobra.Command, args []string) {
+		secretName := args[0]
+		environmentName, _ := cmd.Flags().GetString("env")
+		secretsPath, _ := cmd.Flags().GetString("path")
+		projectId, _ := cmd.Flags().GetString("projectId")
+		offset, _ := cmd.Flags().GetInt("offset")
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		if projectId == "" {
+			workspaceFile, err := util.GetWorkSpaceFromFile()
+			if err != nil {
+				util.PrintErrorMessageAndExit("No project linked. Run 'infisical init' or pass --projectId")
+			}
+			projectId = workspaceFile.WorkspaceId
+		}
+
+		loggedInUserDetails, err := util.GetCurrentLoggedInUserDetails(true)
+		if err != nil {
+			util.HandleError(err, "Unable to authenticate")
+		}
+		if loggedInUserDetails.LoginExpired {
+			loggedInUserDetails = util.EstablishUserLoginSession()
+		}
+
+		httpClient, err := util.GetRestyClientWithCustomHeaders()
+		if err != nil {
+			util.HandleError(err, "Unable to create HTTP client")
+		}
+		httpClient.SetAuthToken(loggedInUserDetails.UserCredentials.JTWToken)
+
+		versionsResponse, err := api.CallGetSecretVersions(httpClient, api.GetSecretVersionsRequest{
+			SecretName:  secretName,
+			WorkspaceId: projectId,
+			Environment: environmentName,
+			SecretPath:  secretsPath,
+			Offset:      offset,
+			Limit:       limit,
+		})
+		if err != nil {
+			util.HandleError(err, "Unable to fetch secret versions")
+		}
+
+		if len(versionsResponse.SecretVersions) == 0 {
+			util.PrintfStdout("No version history found for secret '%s' in environment '%s'\n", secretName, environmentName)
+			return
+		}
+
+		outputFormat, _ := cmd.Flags().GetString("output")
+		if outputFormat != "" {
+			var outputStructure []map[string]any
+			for _, v := range versionsResponse.SecretVersions {
+				outputStructure = append(outputStructure, map[string]any{
+					"version":   v.Version,
+					"value":     v.SecretValue,
+					"comment":   v.SecretComment,
+					"createdAt": v.CreatedAt.Format("2006-01-02 15:04:05"),
+				})
+			}
+			output, err := util.FormatOutput(outputFormat, outputStructure, nil)
+			if err != nil {
+				util.HandleError(err, "Unable to format output")
+			}
+			util.PrintStdout(output)
+		} else {
+			util.PrintfStdout("Version history for '%s' (env: %s):\n\n", secretName, environmentName)
+			headers := []string{"VERSION", "VALUE", "COMMENT", "UPDATED AT"}
+			rows := [][]string{}
+			for _, v := range versionsResponse.SecretVersions {
+				value := v.SecretValue
+				if len(value) > 40 {
+					value = value[:37] + "..."
+				}
+				comment := v.SecretComment
+				if len(comment) > 30 {
+					comment = comment[:27] + "..."
+				}
+				rows = append(rows, []string{
+					fmt.Sprintf("v%d", v.Version),
+					value,
+					comment,
+					v.CreatedAt.Format("2006-01-02 15:04:05"),
+				})
+			}
+			visualize.GenericTable(headers, rows)
+		}
+
+		Telemetry.CaptureEvent("cli-command:secrets versions",
+			posthog.NewProperties().Set("version", util.CLI_VERSION))
+	},
+}
+
+var secretsDiffCmd = &cobra.Command{
+	Use:     "diff",
+	Short:   "Compare secrets between two environments",
+	Example: "infisical secrets diff --env-a=dev --env-b=staging",
+	Args:    cobra.NoArgs,
+	PreRun: func(cmd *cobra.Command, args []string) {
+		util.RequireLogin()
+	},
+	Run: func(cmd *cobra.Command, args []string) {
+		envA, _ := cmd.Flags().GetString("env-a")
+		envB, _ := cmd.Flags().GetString("env-b")
+		secretsPath, _ := cmd.Flags().GetString("path")
+		projectId, _ := cmd.Flags().GetString("projectId")
+
+		if projectId == "" {
+			workspaceFile, err := util.GetWorkSpaceFromFile()
+			if err != nil {
+				util.PrintErrorMessageAndExit("No project linked. Run 'infisical init' or pass --projectId")
+			}
+			projectId = workspaceFile.WorkspaceId
+		}
+
+		loggedInUserDetails, err := util.GetCurrentLoggedInUserDetails(true)
+		if err != nil {
+			util.HandleError(err, "Unable to authenticate")
+		}
+		if loggedInUserDetails.LoginExpired {
+			loggedInUserDetails = util.EstablishUserLoginSession()
+		}
+
+		httpClient, err := util.GetRestyClientWithCustomHeaders()
+		if err != nil {
+			util.HandleError(err, "Unable to create HTTP client")
+		}
+		httpClient.SetAuthToken(loggedInUserDetails.UserCredentials.JTWToken)
+
+		// Fetch secrets from both environments
+		secretsA, err := api.CallGetRawSecretsV3(httpClient, api.GetRawSecretsV3Request{
+			Environment: envA,
+			WorkspaceId: projectId,
+			SecretPath:  secretsPath,
+		})
+		if err != nil {
+			util.HandleError(err, fmt.Sprintf("Unable to fetch secrets from environment '%s'", envA))
+		}
+
+		secretsB, err := api.CallGetRawSecretsV3(httpClient, api.GetRawSecretsV3Request{
+			Environment: envB,
+			WorkspaceId: projectId,
+			SecretPath:  secretsPath,
+		})
+		if err != nil {
+			util.HandleError(err, fmt.Sprintf("Unable to fetch secrets from environment '%s'", envB))
+		}
+
+		// Build maps
+		mapA := make(map[string]string)
+		for _, s := range secretsA.Secrets {
+			mapA[s.SecretKey] = s.SecretValue
+		}
+
+		mapB := make(map[string]string)
+		for _, s := range secretsB.Secrets {
+			mapB[s.SecretKey] = s.SecretValue
+		}
+
+		// Compute diff
+		var onlyInA, onlyInB []string
+		var different [][3]string // key, valueA, valueB
+
+		// Keys in A
+		keysA := []string{}
+		for _, s := range secretsA.Secrets {
+			keysA = append(keysA, s.SecretKey)
+		}
+		sort.Strings(keysA)
+
+		for _, key := range keysA {
+			valB, existsInB := mapB[key]
+			if !existsInB {
+				onlyInA = append(onlyInA, key)
+			} else if mapA[key] != valB {
+				different = append(different, [3]string{key, mapA[key], valB})
+			}
+		}
+
+		// Keys only in B
+		keysB := []string{}
+		for _, s := range secretsB.Secrets {
+			keysB = append(keysB, s.SecretKey)
+		}
+		sort.Strings(keysB)
+
+		for _, key := range keysB {
+			if _, existsInA := mapA[key]; !existsInA {
+				onlyInB = append(onlyInB, key)
+			}
+		}
+
+		outputFormat, _ := cmd.Flags().GetString("output")
+		if outputFormat != "" {
+			diffOutput := map[string]any{
+				"envA":      envA,
+				"envB":      envB,
+				"onlyInA":   onlyInA,
+				"onlyInB":   onlyInB,
+				"different": different,
+				"summary": map[string]int{
+					"onlyInA":   len(onlyInA),
+					"onlyInB":   len(onlyInB),
+					"different": len(different),
+					"totalA":    len(secretsA.Secrets),
+					"totalB":    len(secretsB.Secrets),
+				},
+			}
+			output, err := util.FormatOutput(outputFormat, diffOutput, nil)
+			if err != nil {
+				util.HandleError(err, "Unable to format output")
+			}
+			util.PrintStdout(output)
+		} else {
+			util.PrintfStdout("Comparing secrets: %s vs %s (path: %s)\n\n", envA, envB, secretsPath)
+
+			if len(onlyInA) == 0 && len(onlyInB) == 0 && len(different) == 0 {
+				util.PrintfStdout("Environments are identical (%d secrets each)\n", len(secretsA.Secrets))
+				return
+			}
+
+			if len(onlyInA) > 0 {
+				util.PrintfStdout("Only in %s (%d):\n", envA, len(onlyInA))
+				headers := []string{"KEY"}
+				rows := [][]string{}
+				for _, key := range onlyInA {
+					rows = append(rows, []string{key})
+				}
+				visualize.GenericTable(headers, rows)
+				util.PrintfStdout("\n")
+			}
+
+			if len(onlyInB) > 0 {
+				util.PrintfStdout("Only in %s (%d):\n", envB, len(onlyInB))
+				headers := []string{"KEY"}
+				rows := [][]string{}
+				for _, key := range onlyInB {
+					rows = append(rows, []string{key})
+				}
+				visualize.GenericTable(headers, rows)
+				util.PrintfStdout("\n")
+			}
+
+			if len(different) > 0 {
+				util.PrintfStdout("Different values (%d):\n", len(different))
+				headers := []string{"KEY", fmt.Sprintf("VALUE (%s)", envA), fmt.Sprintf("VALUE (%s)", envB)}
+				rows := [][]string{}
+				for _, d := range different {
+					valA := d[1]
+					if len(valA) > 30 {
+						valA = valA[:27] + "..."
+					}
+					valB := d[2]
+					if len(valB) > 30 {
+						valB = valB[:27] + "..."
+					}
+					rows = append(rows, []string{d[0], valA, valB})
+				}
+				visualize.GenericTable(headers, rows)
+			}
+
+			util.PrintfStdout("\nSummary: %d in %s only, %d in %s only, %d different\n",
+				len(onlyInA), envA, len(onlyInB), envB, len(different))
+		}
+
+		Telemetry.CaptureEvent("cli-command:secrets diff",
+			posthog.NewProperties().Set("version", util.CLI_VERSION))
+	},
+}
+
 func getSecretsByKeys(secrets []models.SingleEnvironmentVariable) map[string]models.SingleEnvironmentVariable {
 	secretMapByName := make(map[string]models.SingleEnvironmentVariable, len(secrets))
 
@@ -873,6 +1149,24 @@ func init() {
 	secretsCmd.AddCommand(folderCmd)
 
 	// ** End of folders sub command
+
+	// *** Secrets versions sub command ***
+	secretsVersionsCmd.Flags().String("projectId", "", "manually set the projectId")
+	secretsVersionsCmd.Flags().String("path", "/", "The secret path")
+	secretsVersionsCmd.Flags().Int("offset", 0, "Pagination offset")
+	secretsVersionsCmd.Flags().Int("limit", 20, "Number of versions to fetch")
+	util.AddOutputFlagsToCmd(secretsVersionsCmd, "The output format for secret versions")
+	secretsCmd.AddCommand(secretsVersionsCmd)
+
+	// *** Secrets diff sub command ***
+	secretsDiffCmd.Flags().String("env-a", "", "First environment to compare (required)")
+	secretsDiffCmd.Flags().String("env-b", "", "Second environment to compare (required)")
+	secretsDiffCmd.MarkFlagRequired("env-a")
+	secretsDiffCmd.MarkFlagRequired("env-b")
+	secretsDiffCmd.Flags().String("projectId", "", "manually set the projectId")
+	secretsDiffCmd.Flags().String("path", "/", "The secret path to compare")
+	util.AddOutputFlagsToCmd(secretsDiffCmd, "The output format for secrets diff")
+	secretsCmd.AddCommand(secretsDiffCmd)
 
 	secretsCmd.Flags().String("token", "", "Fetch secrets using service token or machine identity access token")
 	secretsCmd.Flags().String("projectId", "", "manually set the projectId to fetch secrets when using machine identity based auth")

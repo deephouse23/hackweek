@@ -7,16 +7,26 @@ import (
 
 // allowedCommands is the allowlist of infisical subcommands that ITUI can execute
 var allowedCommands = map[string]bool{
-	"secrets":         true,
-	"secrets get":     true,
-	"secrets set":     true,
-	"secrets delete":  true,
-	"secrets folders": true,
-	"export":          true,
-	"run":             true,
-	"scan":            true,
-	"user":            true,
-	"login":           true,
+	"secrets":            true,
+	"secrets get":        true,
+	"secrets set":        true,
+	"secrets delete":     true,
+	"secrets folders":    true,
+	"secrets versions":   true,
+	"secrets diff":       true,
+	"export":             true,
+	"run":                true,
+	"scan":               true,
+	"user":               true,
+	"login":              true,
+	"orgs":               true,
+	"orgs list":          true,
+	"projects":           true,
+	"projects list":      true,
+	"projects switch":    true,
+	"projects describe":  true,
+	"environments":       true,
+	"environments list":  true,
 }
 
 // dangerousPatterns are shell metacharacters that indicate injection attempts
@@ -114,5 +124,5 @@ func ValidateCommand(command string) error {
 		return nil
 	}
 
-	return fmt.Errorf("command rejected: %q is not an allowed subcommand. Allowed: secrets, export, run, scan, user, login", tokens[0])
+	return fmt.Errorf("command rejected: %q is not an allowed subcommand. Allowed: secrets, export, run, scan, user, login, orgs, projects, environments", tokens[0])
 }

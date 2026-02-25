@@ -259,6 +259,33 @@ type GetAccessibleEnvironmentsResponse struct {
 	} `json:"accessibleEnvironments"`
 }
 
+type GetSecretVersionsRequest struct {
+	SecretName  string
+	WorkspaceId string
+	Environment string
+	SecretPath  string
+	Offset      int
+	Limit       int
+}
+
+type SecretVersion struct {
+	ID            string    `json:"id"`
+	Version       int       `json:"version"`
+	SecretKey     string    `json:"secretKey"`
+	SecretValue   string    `json:"secretValue"`
+	SecretComment string    `json:"secretComment"`
+	Tags          []struct {
+		ID   string `json:"_id"`
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	} `json:"tags"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type GetSecretVersionsResponse struct {
+	SecretVersions []SecretVersion `json:"secretVersions"`
+}
+
 type GetLoginOneV2Request struct {
 	Email           string `json:"email"`
 	ClientPublicKey string `json:"clientPublicKey"`

@@ -168,6 +168,67 @@ func (e *Executor) CheckAuth() (email string, loggedIn bool) {
 	return "", result.Error == nil
 }
 
+// FetchEnvironments retrieves accessible environments for the given project
+func (e *Executor) FetchEnvironments(projectId string) ([]EnvironmentInfo, error) {
+	args := []string{"environments", "list", "--projectId=" + projectId, "--output=json"}
+	result := e.Run(args...)
+	if result.Error != nil {
+		errMsg := result.Stderr
+		if errMsg == "" {
+			errMsg = result.Error.Error()
+		}
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+
+	stdout := strings.TrimSpace(result.Stdout)
+	if stdout == "" || stdout == "null" {
+		return []EnvironmentInfo{}, nil
+	}
+
+	var envs []EnvironmentInfo
+	if err := json.Unmarshal([]byte(stdout), &envs); err != nil {
+		return nil, fmt.Errorf("failed to parse environments JSON: %w", err)
+	}
+	return envs, nil
+}
+
+// FetchProjects retrieves all projects the user has access to
+func (e *Executor) FetchProjects() ([]ProjectInfo, error) {
+	args := []string{"projects", "list", "--output=json"}
+	result := e.Run(args...)
+	if result.Error != nil {
+		errMsg := result.Stderr
+		if errMsg == "" {
+			errMsg = result.Error.Error()
+		}
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+
+	stdout := strings.TrimSpace(result.Stdout)
+	if stdout == "" || stdout == "null" {
+		return []ProjectInfo{}, nil
+	}
+
+	var projects []ProjectInfo
+	if err := json.Unmarshal([]byte(stdout), &projects); err != nil {
+		return nil, fmt.Errorf("failed to parse projects JSON: %w", err)
+	}
+	return projects, nil
+}
+
+// SwitchProject changes the active project
+func (e *Executor) SwitchProject(projectId string) error {
+	result := e.Run("projects", "switch", projectId)
+	if result.Error != nil {
+		errMsg := result.Stderr
+		if errMsg == "" {
+			errMsg = result.Error.Error()
+		}
+		return fmt.Errorf("%s", errMsg)
+	}
+	return nil
+}
+
 // splitArgs splits a command string into arguments, respecting quoted strings
 func splitArgs(s string) []string {
 	var args []string
