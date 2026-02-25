@@ -356,6 +356,11 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focusedPane != PanePrompt {
 			return m, tea.Quit
 		}
+	case "esc":
+		// Reset detail pane to welcome/home screen
+		m.detailPane.ResetToWelcome()
+		m.setFocus(PaneSecretBrowser)
+		return m, nil
 	case "tab":
 		m.cycleFocus(1)
 	case "shift+tab":

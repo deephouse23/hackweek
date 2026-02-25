@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 )
 
 type PromptState int
@@ -170,15 +171,35 @@ func (m PromptBarModel) View() string {
 			actionStyle = actionDestructiveStyle
 		}
 
+		// Available width inside the border/padding
+		innerWidth := m.Width - 6 // border (2) + padding (2) + margin (2)
+		if innerWidth < 20 {
+			innerWidth = 20
+		}
+
+		// Wrap explanation to fit, accounting for "AI > " prefix and action badge
+		explanationWidth := innerWidth - 8 // "AI > " prefix + action badge space
+		if explanationWidth < 10 {
+			explanationWidth = 10
+		}
+		wrappedExplanation := wordwrap.String(m.PreviewExplanation, explanationWidth)
+
 		line1 := fmt.Sprintf("%s %s  %s",
 			promptPrefix.Render("AI >"),
-			explanationStyle.Render(m.PreviewExplanation),
+			explanationStyle.Render(wrappedExplanation),
 			actionStyle.Render("["+m.PreviewActionType+"]"),
 		)
 
+		// Wrap command to fit
+		cmdWidth := innerWidth - 12 // "  Will run: " prefix
+		if cmdWidth < 10 {
+			cmdWidth = 10
+		}
+		wrappedCommand := wordwrap.String(m.PreviewCommand, cmdWidth)
+
 		line2 := fmt.Sprintf("  %s %s",
 			cmdPreviewStyle.Render("Will run:"),
-			cmdPreviewStyle.Render(m.PreviewCommand),
+			cmdPreviewStyle.Render(wrappedCommand),
 		)
 
 		confirmHint := "  Press Enter to execute, Esc to cancel"

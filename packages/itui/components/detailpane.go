@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 )
 
 type DetailMode int
@@ -123,6 +124,13 @@ func (m *DetailPaneModel) SetSecretList(title string, secrets []SecretItem) {
 	m.updateViewportContent()
 }
 
+// ResetToWelcome returns the detail pane to the welcome/home screen.
+func (m *DetailPaneModel) ResetToWelcome() {
+	m.Mode = DetailModeWelcome
+	m.ValueRevealed = false
+	m.updateViewportContent()
+}
+
 // CopyableContent returns the most relevant text for clipboard copy.
 // For secrets: the value. For command output: the output content.
 func (m *DetailPaneModel) CopyableContent() string {
@@ -166,6 +174,15 @@ func (m *DetailPaneModel) updateViewportContent() {
 	m.viewport.SetContent(content)
 }
 
+// wrapText wraps text to fit within the viewport width.
+func (m *DetailPaneModel) wrapText(s string) string {
+	w := m.viewport.Width
+	if w <= 0 {
+		return s
+	}
+	return wordwrap.String(s, w)
+}
+
 func (m *DetailPaneModel) renderSecretDetail() string {
 	var b strings.Builder
 
@@ -180,7 +197,7 @@ func (m *DetailPaneModel) renderSecretDetail() string {
 	b.WriteString(dLabelStyle.Render("Value:"))
 	b.WriteString("  ")
 	if m.ValueRevealed {
-		b.WriteString(dValueStyle.Render(m.SecretValue))
+		b.WriteString(dValueStyle.Render(m.wrapText(m.SecretValue)))
 	} else {
 		b.WriteString(dMaskedStyle.Render("••••••••  [press r to reveal]"))
 	}
@@ -199,7 +216,7 @@ func (m *DetailPaneModel) renderSecretDetail() string {
 		b.WriteString("\n\n")
 		b.WriteString(dLabelStyle.Render("Comment:"))
 		b.WriteString("  ")
-		b.WriteString(dValueStyle.Render(m.SecretComment))
+		b.WriteString(dValueStyle.Render(m.wrapText(m.SecretComment)))
 	}
 
 	return b.String()
@@ -247,7 +264,13 @@ func (m *DetailPaneModel) renderSecretList() string {
 		b.WriteString("  ")
 
 		if m.ValueRevealed {
-			b.WriteString(dValueStyle.Render(s.Value))
+			// Wrap value accounting for indentation and key column width
+			valueWidth := m.viewport.Width - maxKeyLen - 6 // 2 indent + 2 key padding + 2 value padding
+			if valueWidth > 20 {
+				b.WriteString(dValueStyle.Render(wordwrap.String(s.Value, valueWidth)))
+			} else {
+				b.WriteString(dValueStyle.Render(s.Value))
+			}
 		} else {
 			b.WriteString(dMaskedStyle.Render("••••••••"))
 		}
@@ -265,9 +288,9 @@ func (m *DetailPaneModel) renderOutput() string {
 	b.WriteString("\n\n")
 
 	if m.OutputIsError {
-		b.WriteString(dErrorStyle.Render(m.OutputContent))
+		b.WriteString(dErrorStyle.Render(m.wrapText(m.OutputContent)))
 	} else {
-		b.WriteString(dValueStyle.Render(m.OutputContent))
+		b.WriteString(dValueStyle.Render(m.wrapText(m.OutputContent)))
 	}
 
 	return b.String()
