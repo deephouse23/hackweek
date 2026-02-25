@@ -40,9 +40,21 @@ func LoadSessionContext() SessionContext {
 		}
 	}
 
-	// Try to get project name (we'll use the ProjectID for now)
+	// Try to dynamically fetch environments and project name
 	if ctx.ProjectID != "" {
-		ctx.ProjectName = ctx.ProjectID
+		ctx.ProjectName = ctx.ProjectID // fallback
+
+		executor := NewExecutor()
+
+		// Fetch real environments from API
+		if envs, err := executor.FetchEnvironments(ctx.ProjectID); err == nil && len(envs) > 0 {
+			slugs := make([]string, len(envs))
+			for i, e := range envs {
+				slugs[i] = e.Slug
+			}
+			ctx.Environments = slugs
+		}
+		// If fetch fails, we keep the hardcoded fallback
 	}
 
 	return ctx

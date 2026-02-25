@@ -60,6 +60,8 @@ const (
 	operationCallRetrieveCertificate               = "CallRetrieveCertificate"
 	operationCallRenewCertificate                  = "CallRenewCertificate"
 	operationCallGetCertificateRequest             = "CallGetCertificateRequest"
+	operationCallGetAccessibleEnvironments         = "CallGetAccessibleEnvironments"
+	operationCallGetSecretVersions                 = "CallGetSecretVersions"
 )
 
 var ErrNotFound = errors.New("resource not found")
@@ -1096,4 +1098,47 @@ func CallGetCertificateRequest(httpClient *resty.Client, certificateRequestId st
 	}
 
 	return &resBody, nil
+}
+
+func CallGetAccessibleEnvironments(httpClient *resty.Client, request GetAccessibleEnvironmentsRequest) (GetAccessibleEnvironmentsResponse, error) {
+	var envResponse GetAccessibleEnvironmentsResponse
+	response, err := httpClient.
+		R().
+		SetResult(&envResponse).
+		SetHeader("User-Agent", USER_AGENT).
+		Get(fmt.Sprintf("%v/v1/workspace/%s/environments", config.INFISICAL_URL, request.WorkspaceId))
+
+	if err != nil {
+		return GetAccessibleEnvironmentsResponse{}, NewGenericRequestError(operationCallGetAccessibleEnvironments, err)
+	}
+
+	if response.IsError() {
+		return GetAccessibleEnvironmentsResponse{}, NewAPIErrorWithResponse(operationCallGetAccessibleEnvironments, response, nil)
+	}
+
+	return envResponse, nil
+}
+
+func CallGetSecretVersions(httpClient *resty.Client, request GetSecretVersionsRequest) (GetSecretVersionsResponse, error) {
+	var versionsResponse GetSecretVersionsResponse
+	response, err := httpClient.
+		R().
+		SetResult(&versionsResponse).
+		SetHeader("User-Agent", USER_AGENT).
+		SetQueryParam("workspaceId", request.WorkspaceId).
+		SetQueryParam("environment", request.Environment).
+		SetQueryParam("secretPath", request.SecretPath).
+		SetQueryParam("offset", fmt.Sprintf("%d", request.Offset)).
+		SetQueryParam("limit", fmt.Sprintf("%d", request.Limit)).
+		Get(fmt.Sprintf("%v/v1/secret/%s/secret-versions", config.INFISICAL_URL, request.SecretName))
+
+	if err != nil {
+		return GetSecretVersionsResponse{}, NewGenericRequestError(operationCallGetSecretVersions, err)
+	}
+
+	if response.IsError() {
+		return GetSecretVersionsResponse{}, NewAPIErrorWithResponse(operationCallGetSecretVersions, response, nil)
+	}
+
+	return versionsResponse, nil
 }
