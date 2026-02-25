@@ -9,7 +9,7 @@ import (
 
 var (
 	ctxBarStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#7C3AED")).
+			Background(lipgloss.Color("#EAB308")).
 			Foreground(lipgloss.Color("#F9FAFB")).
 			Bold(true).
 			Padding(0, 1)
@@ -21,7 +21,7 @@ var (
 			Padding(0, 1)
 
 	ctxLabelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#C4B5FD"))
+			Foreground(lipgloss.Color("#FDE68A"))
 
 	ctxValueStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#F9FAFB")).

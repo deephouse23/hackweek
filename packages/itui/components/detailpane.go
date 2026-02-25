@@ -27,7 +27,7 @@ var (
 
 	detailActiveBorder = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#7C3AED")).
+				BorderForeground(lipgloss.Color("#EAB308")).
 				Padding(0, 1)
 
 	dLabelStyle = lipgloss.NewStyle().
@@ -51,7 +51,7 @@ var (
 			Foreground(lipgloss.Color("#10B981"))
 
 	dTitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7C3AED")).
+			Foreground(lipgloss.Color("#EAB308")).
 			Bold(true).
 			Padding(0, 0, 1, 0)
 )
