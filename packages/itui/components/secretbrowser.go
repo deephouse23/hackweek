@@ -36,11 +36,12 @@ var (
 			Foreground(lipgloss.Color("#6B7280"))
 )
 
-// SecretItem represents a secret in the list
+// SecretItem represents a secret or folder in the list
 type SecretItem struct {
-	KeyName string
-	Value   string
-	Type    string
+	KeyName  string
+	Value    string
+	Type     string
+	IsFolder bool
 }
 
 func (s SecretItem) FilterValue() string { return s.KeyName }
@@ -58,13 +59,22 @@ func (d SecretItemDelegate) Render(w io.Writer, m list.Model, index int, listIte
 		return
 	}
 
-	masked := maskedStyle.Render("••••••••")
-	line := fmt.Sprintf("%s  %s", item.KeyName, masked)
-
-	if index == m.Index() {
-		line = selectedItemStyle.Render(fmt.Sprintf("▸ %s  %s", item.KeyName, masked))
+	var line string
+	if item.IsFolder {
+		// Folder rendering: 📁 icon, no masked value
+		if index == m.Index() {
+			line = selectedItemStyle.Render(fmt.Sprintf("▸ 📁 %s/", item.KeyName))
+		} else {
+			line = normalItemStyle.Render(fmt.Sprintf("  📁 %s/", item.KeyName))
+		}
 	} else {
-		line = normalItemStyle.Render(fmt.Sprintf("  %s  %s", item.KeyName, masked))
+		// Secret rendering: key + masked value
+		masked := maskedStyle.Render("••••••••")
+		if index == m.Index() {
+			line = selectedItemStyle.Render(fmt.Sprintf("▸ %s  %s", item.KeyName, masked))
+		} else {
+			line = normalItemStyle.Render(fmt.Sprintf("  %s  %s", item.KeyName, masked))
+		}
 	}
 
 	fmt.Fprint(w, line)
@@ -84,6 +94,7 @@ type SecretBrowserModel struct {
 	Selected     int
 	Environments []string // available envs, populated by parent for smart hints
 	CurrentEnv   string   // current env, populated by parent
+	CurrentPath  string   // current folder path, populated by parent
 }
 
 func NewSecretBrowser() SecretBrowserModel {
@@ -144,6 +155,11 @@ func (m SecretBrowserModel) SelectedIndex() int {
 // SelectIndex programmatically selects a secret by index (used by command palette).
 func (m *SecretBrowserModel) SelectIndex(idx int) {
 	m.list.Select(idx)
+}
+
+// IsFiltering returns true if the list is currently in filter-editing mode.
+func (m SecretBrowserModel) IsFiltering() bool {
+	return m.list.FilterState() == list.Filtering
 }
 
 func (m SecretBrowserModel) Update(msg tea.Msg) (SecretBrowserModel, tea.Cmd) {
@@ -218,6 +234,12 @@ func (m SecretBrowserModel) View() string {
 
 	content := m.list.View()
 
+	// Show breadcrumb when not at root
+	if m.CurrentPath != "" && m.CurrentPath != "/" {
+		breadcrumb := m.buildBreadcrumb()
+		content = breadcrumb + "\n" + content
+	}
+
 	// Show smart navigation hints when filtering yields no results
 	if m.list.FilterState() == list.Filtering && len(m.list.VisibleItems()) == 0 {
 		hints := m.buildFilterHints()
@@ -269,4 +291,19 @@ func (m SecretBrowserModel) buildFilterHints() string {
 
 	header := hintStyle.Render("  Did you mean?")
 	return header + "\n" + strings.Join(hints, "\n")
+}
+
+// buildBreadcrumb renders a styled path breadcrumb like "/ > config > api"
+func (m SecretBrowserModel) buildBreadcrumb() string {
+	pathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7C3AED"))
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+
+	parts := strings.Split(strings.Trim(m.CurrentPath, "/"), "/")
+	rendered := pathStyle.Render("/")
+	for _, p := range parts {
+		if p != "" {
+			rendered += sepStyle.Render(" > ") + pathStyle.Render(p)
+		}
+	}
+	return "  " + rendered
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/Infisical/infisical-merge/packages/itui/components"
@@ -14,6 +15,7 @@ import (
 // Messages
 type secretsLoadedMsg struct {
 	secrets []Secret
+	folders []FolderInfo
 	err     error
 }
 
@@ -48,6 +50,7 @@ type Model struct {
 	// State
 	ctx             SessionContext
 	secrets         []Secret
+	folders         []FolderInfo
 	focusedPane     FocusedPane
 	mode            AppMode
 	aiClient        *AIClient
@@ -115,7 +118,12 @@ func (m Model) loadContext() tea.Msg {
 
 func (m Model) loadSecrets() tea.Msg {
 	secrets, err := m.executor.FetchSecrets(m.ctx.Environment, m.ctx.Path)
-	return secretsLoadedMsg{secrets: secrets, err: err}
+	if err != nil {
+		return secretsLoadedMsg{err: err}
+	}
+	// Folder fetch is non-fatal — just show no folders if it fails
+	folders, _ := m.executor.FetchFolders(m.ctx.Environment, m.ctx.Path)
+	return secretsLoadedMsg{secrets: secrets, folders: folders}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -212,6 +220,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingAction = nil // clear pending on error
 		} else {
 			m.secrets = msg.secrets
+			m.folders = msg.folders
 			m.updateSecretBrowser()
 		}
 		// Execute pending action after secrets are loaded
@@ -442,6 +451,20 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.focusedPane == PaneSecretBrowser {
 			if item, ok := m.secretBrowser.SelectedItem(); ok {
+				if item.IsFolder {
+					// Navigate into folder or go up
+					if item.KeyName == ".." {
+						m.ctx.Path = parentPath(m.ctx.Path)
+					} else {
+						if m.ctx.Path == "/" || m.ctx.Path == "" {
+							m.ctx.Path = "/" + item.KeyName
+						} else {
+							m.ctx.Path = m.ctx.Path + "/" + item.KeyName
+						}
+					}
+					m.updateContextBar()
+					return m, m.loadSecrets
+				}
 				// Find the full secret
 				for _, s := range m.secrets {
 					if s.Key == item.KeyName {
@@ -454,6 +477,15 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+	case "backspace":
+		// Navigate up a folder level when in secret browser and not filtering
+		if m.focusedPane == PaneSecretBrowser && !m.secretBrowser.IsFiltering() && m.ctx.Path != "/" && m.ctx.Path != "" {
+			m.ctx.Path = parentPath(m.ctx.Path)
+			m.updateContextBar()
+			return m, m.loadSecrets
+		}
+		// Fall through to default to let the list handle backspace (e.g. in filter mode)
+		fallthrough
 	default:
 		// Forward unhandled keys to the active component so arrow keys,
 		// j/k, and other navigation reach the secret browser list.
@@ -713,15 +745,29 @@ func (m *Model) updateContextBar() {
 }
 
 func (m *Model) updateSecretBrowser() {
-	items := make([]components.SecretItem, len(m.secrets))
-	for i, s := range m.secrets {
-		items[i] = components.SecretItem{
+	var items []components.SecretItem
+
+	// Add ".." entry to go up when not at root
+	if m.ctx.Path != "/" && m.ctx.Path != "" {
+		items = append(items, components.SecretItem{KeyName: "..", IsFolder: true})
+	}
+
+	// Add folders at the top
+	for _, f := range m.folders {
+		items = append(items, components.SecretItem{KeyName: f.Name, IsFolder: true})
+	}
+
+	// Add secrets below folders
+	for _, s := range m.secrets {
+		items = append(items, components.SecretItem{
 			KeyName: s.Key,
 			Value:   s.Value,
 			Type:    s.Type,
-		}
+		})
 	}
+
 	m.secretBrowser.SetSecrets(items)
+	m.secretBrowser.CurrentPath = m.ctx.Path
 	m.secretBrowser.Environments = m.ctx.Environments
 	m.secretBrowser.CurrentEnv = m.ctx.Environment
 }
@@ -854,6 +900,18 @@ func placeOverlay(x, y int, overlay, background string) string {
 	}
 
 	return strings.Join(bgLines, "\n")
+}
+
+// parentPath returns the parent of the given path, e.g. "/a/b" → "/a", "/a" → "/"
+func parentPath(p string) string {
+	if p == "/" || p == "" {
+		return "/"
+	}
+	parent := path.Dir(p)
+	if parent == "." {
+		return "/"
+	}
+	return parent
 }
 
 // Run starts the ITUI application
