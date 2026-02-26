@@ -7,9 +7,15 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+var infisicalSpinner = spinner.Spinner{
+	Frames: []string{"⣾ ", "⣽ ", "⣻ ", "⢿ ", "⡿ ", "⣟ ", "⣯ ", "⣷ "},
+	FPS:    spinner.Dot.FPS,
+}
 
 var (
 	browserBorder = lipgloss.NewStyle().
@@ -88,6 +94,9 @@ type NavigationHintMsg struct {
 
 type SecretBrowserModel struct {
 	list         list.Model
+	spinner      spinner.Model
+	IsLoading    bool
+	loadingMsg   string
 	Active       bool
 	Width        int
 	Height       int
@@ -119,9 +128,27 @@ func NewSecretBrowser() SecretBrowserModel {
 		ClearFilter:          key.NewBinding(key.WithKeys("esc")),
 	}
 
+	s := spinner.New(
+		spinner.WithSpinner(infisicalSpinner),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308"))),
+	)
+
 	return SecretBrowserModel{
-		list: l,
+		list:    l,
+		spinner: s,
 	}
+}
+
+// StartLoading sets the browser into a loading state and kicks off the spinner animation.
+func (m *SecretBrowserModel) StartLoading(msg string) tea.Cmd {
+	m.IsLoading = true
+	m.loadingMsg = msg
+	return m.spinner.Tick
+}
+
+// StopLoading clears the loading state.
+func (m *SecretBrowserModel) StopLoading() {
+	m.IsLoading = false
 }
 
 func (m *SecretBrowserModel) SetSecrets(secrets []SecretItem) {
@@ -163,6 +190,15 @@ func (m SecretBrowserModel) IsFiltering() bool {
 }
 
 func (m SecretBrowserModel) Update(msg tea.Msg) (SecretBrowserModel, tea.Cmd) {
+	// Always handle spinner ticks regardless of active state
+	if m.IsLoading {
+		if _, ok := msg.(spinner.TickMsg); ok {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+	}
+
 	if !m.Active {
 		return m, nil
 	}
@@ -232,6 +268,10 @@ func (m SecretBrowserModel) View() string {
 		style = style.Height(m.Height - 2)
 	}
 
+	if m.IsLoading {
+		return style.Render(m.renderLoading())
+	}
+
 	content := m.list.View()
 
 	// Show breadcrumb when not at root
@@ -291,6 +331,42 @@ func (m SecretBrowserModel) buildFilterHints() string {
 
 	header := hintStyle.Render("  Did you mean?")
 	return header + "\n" + strings.Join(hints, "\n")
+}
+
+// renderLoading renders an Infisical-branded loading animation.
+func (m SecretBrowserModel) renderLoading() string {
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#EAB308")).
+		Bold(true).
+		Padding(0, 0, 1, 0)
+
+	innerW := m.Width - 6 // account for border + padding
+	if innerW < 10 {
+		innerW = 10
+	}
+	innerH := m.Height - 6
+	if innerH < 3 {
+		innerH = 3
+	}
+
+	spinnerFrame := m.spinner.View()
+	msg := m.loadingMsg
+	if msg == "" {
+		msg = "Loading..."
+	}
+
+	line := spinnerFrame + lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F9FAFB")).
+		Render(" "+msg)
+
+	// Build a centered block
+	topPad := strings.Repeat("\n", innerH/2)
+	centered := lipgloss.NewStyle().
+		Width(innerW).
+		Align(lipgloss.Center).
+		Render(line)
+
+	return titleStyle.Render("Secrets") + topPad + centered
 }
 
 // buildBreadcrumb renders a styled path breadcrumb like "/ > config > api"
