@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/Infisical/infisical-merge/packages/itui/components"
@@ -67,6 +68,12 @@ type diffCopyDoneMsg struct {
 	err       error
 }
 
+// accessTreeLoadedMsg carries the result of an async access-tree build.
+type accessTreeLoadedMsg struct {
+	nodes []*components.AccessTreeNode
+	err   error
+}
+
 // Model is the top-level Bubble Tea model
 type Model struct {
 	// Components
@@ -80,6 +87,7 @@ type Model struct {
 	helpModal     components.HelpModel
 	cmdPalette    components.CmdPaletteModel
 	pasteAnalyzer components.PasteAnalyzerModel
+	accessTree    components.AccessTreeModel
 
 	// State
 	ctx             SessionContext
@@ -128,6 +136,7 @@ func NewModel() Model {
 		helpModal:       components.NewHelp(),
 		cmdPalette:      components.NewCmdPalette(),
 		pasteAnalyzer:   components.NewPasteAnalyzer(),
+		accessTree:      components.NewAccessTree(),
 		focusedPane:     PaneSecretBrowser,
 		mode:            ModeNormal,
 		executor:        executor,
@@ -254,6 +263,17 @@ func (m Model) loadPropagation(secretKey string) tea.Cmd {
 	}
 }
 
+func (m Model) loadAccessTree() tea.Cmd {
+	executor := m.executor
+	env := m.accessTree.CurrentEnv()
+	envInfos := m.ctx.EnvironmentInfos
+
+	return func() tea.Msg {
+		nodes, err := buildAccessTree(executor, env, envInfos)
+		return accessTreeLoadedMsg{nodes: nodes, err: err}
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -271,12 +291,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.updateLayout()
 		m.helpModal.SetSize(msg.Width, msg.Height)
+		m.accessTree.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tea.KeyMsg:
 		// Global quit
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+
+		// Access tree gets priority when visible – it handles its own keys.
+		if m.accessTree.Visible {
+			var cmd tea.Cmd
+			m.accessTree, cmd = m.accessTree.Update(msg)
+			return m, cmd
 		}
 
 		// Handle overlays first (priority: help → cmdPalette → pasteAnalyzer → envPicker → ...)
@@ -498,12 +526,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		spinCmd := m.detailPane.StartLoading(fmt.Sprintf("Refreshing diff for '%s'...", msg.secretKey))
 		return m, tea.Batch(m.loadDiff(msg.secretKey, msg.envB), spinCmd)
 
+	case accessTreeLoadedMsg:
+		var cmd tea.Cmd
+		m.accessTree, cmd = m.accessTree.Update(components.AccessTreeDataMsg{
+			Nodes: msg.nodes,
+			Err:   msg.err,
+		})
+		return m, cmd
+
+	case components.AccessTreeCloseMsg:
+		m.accessTree.Hide()
+		return m, nil
+
+	case components.AccessTreeEnvChangedMsg:
+		// Reload the tree for the newly-selected environment.
+		return m, m.loadAccessTree()
+
 	case components.ConfirmYesMsg:
 		if m.pendingPropagationCopy != nil {
 			cp := m.pendingPropagationCopy
 			m.pendingPropagationCopy = nil
 			executor := m.executor
-			return m, func() tea.Msg {
+			spinCmd := m.secretBrowser.StartLoading("Copying secret...")
+			return m, tea.Batch(spinCmd, func() tea.Msg {
 				result := executor.RunSecretSet(
 					[]string{cp.key + "=" + cp.value},
 					[]string{"--env=" + cp.targetEnv},
@@ -516,7 +561,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return propagationCopyDoneMsg{secretKey: cp.key, err: fmt.Errorf("%s", errMsg)}
 				}
 				return propagationCopyDoneMsg{secretKey: cp.key}
-			}
+			})
 		}
 		if m.pendingDiffCopy != nil {
 			cp := m.pendingDiffCopy
@@ -524,7 +569,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			envB := m.detailPane.DiffEnvB
 			m.pendingDiffCopy = nil
 			executor := m.executor
-			return m, func() tea.Msg {
+			spinCmd := m.secretBrowser.StartLoading("Copying secret...")
+			return m, tea.Batch(spinCmd, func() tea.Msg {
 				result := executor.RunSecretSet(
 					[]string{cp.key + "=" + cp.value},
 					[]string{"--env=" + cp.targetEnv},
@@ -537,9 +583,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return diffCopyDoneMsg{secretKey: cp.key, envA: envA, envB: envB, err: fmt.Errorf("%s", errMsg)}
 				}
 				return diffCopyDoneMsg{secretKey: cp.key, envA: envA, envB: envB}
-			}
+			})
 		}
-		return m, m.executeCommand(msg.Command)
+		spinCmd := m.secretBrowser.StartLoading("Running command...")
+		return m, tea.Batch(spinCmd, m.executeCommand(msg.Command))
 
 	case components.ConfirmNoMsg:
 		m.promptBar.Reset()
@@ -574,7 +621,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		path := m.ctx.Path
 		key := msg.Key
 		value := msg.Value
-		return m, func() tea.Msg {
+		spinCmd := m.secretBrowser.StartLoading("Creating secret...")
+		return m, tea.Batch(spinCmd, func() tea.Msg {
 			kvPairs := []string{key + "=" + value}
 			flags := []string{"--env=" + env}
 			if path != "" && path != "/" {
@@ -588,7 +636,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ExecutionResult:  "success",
 			})
 			return commandExecutedMsg{result: result}
-		}
+		})
 	}
 
 	// Update active components
@@ -712,6 +760,11 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if content, err := ReadFromClipboard(); err == nil && content != "" {
 			m.pasteAnalyzer.SetClipboardContent(content)
 		}
+	case "A":
+		// Open the access tree overlay
+		m.accessTree.Show(m.ctx.Environments, m.ctx.Environment, m.ctx.UserEmail)
+		m.accessTree.SetSize(m.windowWidth, m.windowHeight)
+		return m, m.loadAccessTree()
 	case "enter":
 		if m.focusedPane == PaneSecretBrowser {
 			if item, ok := m.secretBrowser.SelectedItem(); ok {
@@ -811,7 +864,8 @@ func (m *Model) handlePreviewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		if !m.promptBar.PreviewConfirm {
-			return m, m.executeCommand(m.promptBar.PreviewCommand)
+			spinCmd := m.secretBrowser.StartLoading("Running command...")
+			return m, tea.Batch(spinCmd, m.executeCommand(m.promptBar.PreviewCommand))
 		}
 		// Needs confirmation
 		isProd := strings.EqualFold(m.ctx.Environment, "prod") || strings.EqualFold(m.ctx.Environment, "production")
@@ -824,7 +878,8 @@ func (m *Model) handlePreviewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "y", "Y":
 		if m.promptBar.PreviewConfirm {
-			return m, m.executeCommand(m.promptBar.PreviewCommand)
+			spinCmd := m.secretBrowser.StartLoading("Running command...")
+			return m, tea.Batch(spinCmd, m.executeCommand(m.promptBar.PreviewCommand))
 		}
 	}
 	return m, nil
@@ -1085,6 +1140,14 @@ func (m Model) View() string {
 		return "Loading ITUI..."
 	}
 
+	// Access tree takes over the full content area when visible.
+	if m.accessTree.Visible {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			m.contextBar.View(),
+			m.accessTree.View(),
+		)
+	}
+
 	// Check for overlays (priority matches Update chain)
 	var overlay string
 	if m.helpModal.Visible {
@@ -1191,6 +1254,83 @@ func parentPath(p string) string {
 		return "/"
 	}
 	return parent
+}
+
+// buildAccessTree constructs the folder permission tree for the given environment.
+func buildAccessTree(executor *Executor, env string, envInfos []EnvironmentInfo) ([]*components.AccessTreeNode, error) {
+	isWriteDenied := false
+	for _, e := range envInfos {
+		if e.Slug == env {
+			isWriteDenied = e.IsWriteDenied
+			break
+		}
+	}
+
+	makeActions := func() map[string]components.AccessLevel {
+		m := map[string]components.AccessLevel{
+			"describe":      components.AccessLevelFull,
+			"read-value":    components.AccessLevelFull,
+			"create":        components.AccessLevelFull,
+			"edit":          components.AccessLevelFull,
+			"delete":        components.AccessLevelFull,
+			"folder-create": components.AccessLevelFull,
+			"folder-edit":   components.AccessLevelFull,
+			"folder-delete": components.AccessLevelFull,
+		}
+		if isWriteDenied {
+			m["create"] = components.AccessLevelNone
+			m["edit"] = components.AccessLevelNone
+			m["delete"] = components.AccessLevelNone
+			m["folder-create"] = components.AccessLevelNone
+			m["folder-edit"] = components.AccessLevelNone
+			m["folder-delete"] = components.AccessLevelNone
+		}
+		return m
+	}
+
+	root := &components.AccessTreeNode{
+		Name:    "/",
+		Path:    "/",
+		Depth:   0,
+		Actions: makeActions(),
+	}
+
+	fetchFoldersBFS(executor, env, root, makeActions, 2)
+	return []*components.AccessTreeNode{root}, nil
+}
+
+// fetchFoldersBFS recursively fetches child folders up to maxDepth levels deep.
+func fetchFoldersBFS(executor *Executor, env string, parent *components.AccessTreeNode, makeActions func() map[string]components.AccessLevel, maxDepth int) {
+	if parent.Depth >= maxDepth {
+		return
+	}
+	folders, err := executor.FetchFolders(env, parent.Path)
+	if err != nil {
+		return // non-fatal: just show no children
+	}
+
+	for _, f := range folders {
+		childPath := f.Path
+		if childPath == "" {
+			if parent.Path == "/" {
+				childPath = "/" + f.Name
+			} else {
+				childPath = parent.Path + "/" + f.Name
+			}
+		}
+		child := &components.AccessTreeNode{
+			Name:    f.Name,
+			Path:    childPath,
+			Depth:   parent.Depth + 1,
+			Actions: makeActions(),
+		}
+		fetchFoldersBFS(executor, env, child, makeActions, maxDepth)
+		parent.Children = append(parent.Children, child)
+	}
+
+	sort.Slice(parent.Children, func(i, j int) bool {
+		return parent.Children[i].Name < parent.Children[j].Name
+	})
 }
 
 // Run starts the ITUI application

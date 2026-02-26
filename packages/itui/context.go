@@ -53,6 +53,7 @@ func LoadSessionContext() SessionContext {
 				slugs[i] = e.Slug
 			}
 			ctx.Environments = slugs
+			ctx.EnvironmentInfos = envs
 		}
 		// If fetch fails, we keep the hardcoded fallback
 	}

@@ -2,6 +2,16 @@ package itui
 
 import "time"
 
+// AccessLevel represents the permission access level for an action on a folder path
+type AccessLevel int
+
+const (
+	AccessLevelUnknown AccessLevel = iota // no data (rules not fetched)
+	AccessLevelNone                       // explicitly no permission
+	AccessLevelPartial                    // permitted but only under conditions
+	AccessLevelFull                       // unconditionally permitted
+)
+
 // FocusedPane tracks which pane has keyboard focus
 type FocusedPane int
 
@@ -47,14 +57,15 @@ type Tag struct {
 
 // SessionContext holds the current TUI session state
 type SessionContext struct {
-	UserEmail    string
-	ProjectID    string
-	ProjectName  string
-	Environment  string
-	Path         string
-	IsLoggedIn   bool
-	LoginExpired bool
-	Environments []string
+	UserEmail        string
+	ProjectID        string
+	ProjectName      string
+	Environment      string
+	Path             string
+	IsLoggedIn       bool
+	LoginExpired     bool
+	Environments     []string         // slugs for quick access
+	EnvironmentInfos []EnvironmentInfo // full info including IsWriteDenied
 }
 
 // PendingActionType identifies a deferred action to run after a navigation change
