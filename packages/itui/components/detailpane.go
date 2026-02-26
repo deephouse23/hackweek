@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -84,14 +83,13 @@ type DiffCopyRequestMsg struct {
 }
 
 type DetailPaneModel struct {
-	viewport    viewport.Model
-	spinner     spinner.Model
-	IsLoading   bool
-	loadingMsg  string
-	Active      bool
-	Mode        DetailMode
-	Width       int
-	Height      int
+	viewport  viewport.Model
+	overlay   OverlayModel
+	IsLoading bool
+	Active    bool
+	Mode      DetailMode
+	Width     int
+	Height    int
 
 	// Secret detail
 	SecretKey     string
@@ -129,13 +127,9 @@ type DetailPaneModel struct {
 
 func NewDetailPane() DetailPaneModel {
 	vp := viewport.New(30, 10)
-	s := spinner.New(
-		spinner.WithSpinner(infisicalSpinner),
-		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308"))),
-	)
 	return DetailPaneModel{
 		viewport: vp,
-		spinner:  s,
+		overlay:  NewOverlay(),
 		Mode:     DetailModeWelcome,
 	}
 }
@@ -143,13 +137,15 @@ func NewDetailPane() DetailPaneModel {
 // StartLoading puts the detail pane into an animated loading state.
 func (m *DetailPaneModel) StartLoading(msg string) tea.Cmd {
 	m.IsLoading = true
-	m.loadingMsg = msg
-	return m.spinner.Tick
+	m.overlay.Width = m.Width
+	m.overlay.Height = m.Height
+	return m.overlay.Show(msg)
 }
 
 // StopLoading clears the loading state.
 func (m *DetailPaneModel) StopLoading() {
 	m.IsLoading = false
+	m.overlay.Hide()
 }
 
 func (m *DetailPaneModel) SetSize(width, height int) {
@@ -714,11 +710,11 @@ func (m *DetailPaneModel) renderWelcome() string {
 }
 
 func (m DetailPaneModel) Update(msg tea.Msg) (DetailPaneModel, tea.Cmd) {
-	// Always handle spinner ticks regardless of active state
+	// Always handle overlay ticks regardless of active state
 	if m.IsLoading {
-		if _, ok := msg.(spinner.TickMsg); ok {
+		if _, ok := msg.(LoadingTickMsg); ok {
 			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
+			m.overlay, cmd = m.overlay.Update(msg)
 			return m, cmd
 		}
 	}
@@ -812,50 +808,12 @@ func (m DetailPaneModel) View() string {
 	}
 
 	if m.IsLoading {
-		return style.Render(m.renderDetailLoading())
+		m.overlay.Width = m.Width
+		m.overlay.Height = m.Height
+		return style.Render(m.overlay.View())
 	}
 
 	m.updateViewportContent()
 	return style.Render(m.viewport.View())
 }
 
-// renderDetailLoading renders a centered Infisical-branded loading animation for the detail pane.
-func (m DetailPaneModel) renderDetailLoading() string {
-	innerW := m.Width - 6
-	if innerW < 10 {
-		innerW = 10
-	}
-	innerH := m.Height - 6
-	if innerH < 3 {
-		innerH = 3
-	}
-
-	spinnerFrame := m.spinner.View()
-	msg := m.loadingMsg
-	if msg == "" {
-		msg = "Loading..."
-	}
-
-	titleLine := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#EAB308")).
-		Bold(true).
-		Width(innerW).
-		Align(lipgloss.Center).
-		Render("✦ INFISICAL")
-
-	spinnerLine := spinnerFrame + lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F9FAFB")).
-		Render(" " + msg)
-
-	centeredSpinner := lipgloss.NewStyle().
-		Width(innerW).
-		Align(lipgloss.Center).
-		Render(spinnerLine)
-
-	topPad := strings.Repeat("\n", innerH/2-1)
-	if innerH/2-1 < 0 {
-		topPad = ""
-	}
-
-	return topPad + titleLine + "\n\n" + centeredSpinner
-}

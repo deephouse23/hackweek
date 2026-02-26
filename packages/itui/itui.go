@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/Infisical/infisical-merge/packages/itui/components"
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -259,8 +258,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case spinner.TickMsg:
-		// Route spinner ticks to whichever component is currently animating.
+	case components.LoadingTickMsg:
+		// Route animation ticks to whichever component is currently loading.
 		var cmd1, cmd2 tea.Cmd
 		m.secretBrowser, cmd1 = m.secretBrowser.Update(msg)
 		m.detailPane, cmd2 = m.detailPane.Update(msg)
