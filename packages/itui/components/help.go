@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -9,50 +10,78 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var (
-	helpModalStyle = lipgloss.NewStyle().
-			Border(lipgloss.DoubleBorder()).
-			BorderForeground(lipgloss.Color("#EAB308")).
-			Padding(1, 2).
-			Width(60)
+const (
+	helpKeyColWidth = 22 // wide enough for "Up / Down / j / k" + padding
+	helpModalOuter  = 72 // outer modal width
+)
 
+var (
 	helpTitleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#EAB308")).
 			Bold(true)
 
-	helpKeyBind = lipgloss.NewStyle().
+	helpKeyStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#10B981")).
-			Bold(true).
-			Width(16)
+			Bold(true)
 
-	helpDescBind = lipgloss.NewStyle().
+	helpDescStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#F9FAFB"))
 
 	helpSectionStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#F59E0B")).
-				Bold(true).
-				Padding(1, 0, 0, 0)
+				Bold(true)
+
+	helpDimStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6B7280"))
 )
 
 type HelpModel struct {
-	Visible  bool
-	viewport viewport.Model
+	Visible      bool
+	viewport     viewport.Model
+	windowWidth  int
+	windowHeight int
 }
 
 func NewHelp() HelpModel {
-	vp := viewport.New(56, 20)
-	vp.SetContent(helpContent())
-	return HelpModel{
-		viewport: vp,
-	}
+	vp := viewport.New(helpModalOuter-8, 24)
+	vp.SetContent(helpContent(helpModalOuter - 8))
+	return HelpModel{viewport: vp}
 }
 
 func (m *HelpModel) Show() {
 	m.Visible = true
+	m.viewport.GotoTop()
 }
 
 func (m *HelpModel) Hide() {
 	m.Visible = false
+}
+
+// SetSize adapts the modal to the current terminal dimensions.
+func (m *HelpModel) SetSize(w, h int) {
+	m.windowWidth = w
+	m.windowHeight = h
+
+	outerWidth := helpModalOuter
+	if w-4 < outerWidth {
+		outerWidth = w - 4
+	}
+	// inner = outer - 2 borders - 2*2 padding
+	innerWidth := outerWidth - 6
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+
+	// viewport height = window height minus modal chrome:
+	// 2 border + 2 top/bottom padding + 1 title + 1 blank + 2 close hint lines = ~8
+	vpHeight := h - 10
+	if vpHeight < 5 {
+		vpHeight = 5
+	}
+
+	m.viewport.Width = innerWidth
+	m.viewport.Height = vpHeight
+	m.viewport.SetContent(helpContent(innerWidth))
 }
 
 func (m HelpModel) Update(msg tea.Msg) (HelpModel, tea.Cmd) {
@@ -79,13 +108,40 @@ func (m HelpModel) View() string {
 		return ""
 	}
 
-	content := helpTitleStyle.Render("ITUI Keyboard Shortcuts") + "\n" + m.viewport.View() + "\n\n" +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Press Esc or ? to close")
+	outerWidth := helpModalOuter
+	if m.windowWidth > 0 && m.windowWidth-4 < outerWidth {
+		outerWidth = m.windowWidth - 4
+	}
 
-	return helpModalStyle.Render(content)
+	modalStyle := lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color("#EAB308")).
+		Padding(1, 2).
+		Width(outerWidth)
+
+	scrollHint := ""
+	if m.viewport.TotalLineCount() > m.viewport.Height {
+		pct := int(m.viewport.ScrollPercent() * 100)
+		scrollHint = helpDimStyle.Render(fmt.Sprintf(" (%d%%)", pct))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		helpTitleStyle.Render("ITUI Keyboard Shortcuts")+scrollHint,
+		"",
+		m.viewport.View(),
+		"",
+		helpDimStyle.Render("Press Esc or ? to close   ↑↓ to scroll"),
+	)
+
+	return modalStyle.Render(content)
 }
 
-func helpContent() string {
+func helpContent(innerWidth int) string {
+	descWidth := innerWidth - helpKeyColWidth - 2
+	if descWidth < 10 {
+		descWidth = 10
+	}
+
 	sections := []struct {
 		title string
 		binds []struct{ key, desc string }
@@ -138,15 +194,27 @@ func helpContent() string {
 		},
 	}
 
-	var content string
+	var b strings.Builder
 	for _, section := range sections {
-		content += helpSectionStyle.Render(section.title) + "\n"
-		for _, b := range section.binds {
-			content += fmt.Sprintf("  %s%s\n", helpKeyBind.Render(b.key), helpDescBind.Render(b.desc))
+		b.WriteString(helpSectionStyle.Render(section.title))
+		b.WriteString("\n")
+		for _, bind := range section.binds {
+			key := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#10B981")).
+				Bold(true).
+				Width(helpKeyColWidth).
+				Render(bind.key)
+			desc := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#F9FAFB")).
+				Width(descWidth).
+				Render(bind.desc)
+			b.WriteString(fmt.Sprintf("  %s  %s\n", key, desc))
 		}
+		b.WriteString("\n")
 	}
 
-	content += "\n" + helpSectionStyle.Render("Example AI Prompts") + "\n"
+	b.WriteString(helpSectionStyle.Render("Example AI Prompts"))
+	b.WriteString("\n")
 	examples := []string{
 		"show me all production secrets",
 		"set DATABASE_URL to postgres://... in staging",
@@ -155,8 +223,9 @@ func helpContent() string {
 		"export all dev secrets as .env",
 	}
 	for _, ex := range examples {
-		content += fmt.Sprintf("  %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#FDE68A")).Italic(true).Render("\""+ex+"\""))
+		b.WriteString(fmt.Sprintf("  %s\n",
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#FDE68A")).Italic(true).Render("\""+ex+"\"")))
 	}
 
-	return content
+	return b.String()
 }

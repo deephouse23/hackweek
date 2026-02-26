@@ -83,11 +83,13 @@ type DiffCopyRequestMsg struct {
 }
 
 type DetailPaneModel struct {
-	viewport viewport.Model
-	Active   bool
-	Mode     DetailMode
-	Width    int
-	Height   int
+	viewport  viewport.Model
+	overlay   OverlayModel
+	IsLoading bool
+	Active    bool
+	Mode      DetailMode
+	Width     int
+	Height    int
 
 	// Secret detail
 	SecretKey     string
@@ -127,8 +129,23 @@ func NewDetailPane() DetailPaneModel {
 	vp := viewport.New(30, 10)
 	return DetailPaneModel{
 		viewport: vp,
+		overlay:  NewOverlay(),
 		Mode:     DetailModeWelcome,
 	}
+}
+
+// StartLoading puts the detail pane into an animated loading state.
+func (m *DetailPaneModel) StartLoading(msg string) tea.Cmd {
+	m.IsLoading = true
+	m.overlay.Width = m.Width
+	m.overlay.Height = m.Height
+	return m.overlay.Show(msg)
+}
+
+// StopLoading clears the loading state.
+func (m *DetailPaneModel) StopLoading() {
+	m.IsLoading = false
+	m.overlay.Hide()
 }
 
 func (m *DetailPaneModel) SetSize(width, height int) {
@@ -693,6 +710,15 @@ func (m *DetailPaneModel) renderWelcome() string {
 }
 
 func (m DetailPaneModel) Update(msg tea.Msg) (DetailPaneModel, tea.Cmd) {
+	// Always handle overlay ticks regardless of active state
+	if m.IsLoading {
+		if _, ok := msg.(LoadingTickMsg); ok {
+			var cmd tea.Cmd
+			m.overlay, cmd = m.overlay.Update(msg)
+			return m, cmd
+		}
+	}
+
 	if !m.Active {
 		return m, nil
 	}
@@ -781,6 +807,13 @@ func (m DetailPaneModel) View() string {
 		style = style.Height(m.Height - 2)
 	}
 
+	if m.IsLoading {
+		m.overlay.Width = m.Width
+		m.overlay.Height = m.Height
+		return style.Render(m.overlay.View())
+	}
+
 	m.updateViewportContent()
 	return style.Render(m.viewport.View())
 }
+

@@ -258,11 +258,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case components.LoadingTickMsg:
+		// Route animation ticks to whichever component is currently loading.
+		var cmd1, cmd2 tea.Cmd
+		m.secretBrowser, cmd1 = m.secretBrowser.Update(msg)
+		m.detailPane, cmd2 = m.detailPane.Update(msg)
+		return m, tea.Batch(cmd1, cmd2)
+
 	case tea.WindowSizeMsg:
 		m.windowWidth = msg.Width
 		m.windowHeight = msg.Height
 		m.ready = true
 		m.updateLayout()
+		m.helpModal.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -340,9 +348,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		return m, m.loadSecrets
+		spinCmd := m.secretBrowser.StartLoading("Loading " + m.ctx.Environment + " secrets...")
+		return m, tea.Batch(m.loadSecrets, spinCmd)
 
 	case secretsLoadedMsg:
+		m.secretBrowser.StopLoading()
 		if msg.err != nil {
 			m.detailPane.SetOutput("Error Loading Secrets", msg.err.Error(), true)
 			m.pendingAction = nil // clear pending on error
@@ -409,18 +419,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.promptBar.Reset()
 		// Refresh secrets after any command
-		return m, m.loadSecrets
+		spinCmd := m.secretBrowser.StartLoading("Syncing secrets...")
+		return m, tea.Batch(m.loadSecrets, spinCmd)
 
 	case components.EnvSelectedMsg:
 		m.ctx.Environment = msg.Environment
 		m.updateContextBar()
-		return m, m.loadSecrets
+		spinCmd := m.secretBrowser.StartLoading("Loading " + msg.Environment + " secrets...")
+		return m, tea.Batch(m.loadSecrets, spinCmd)
 
 	case components.DiffEnvSelectedMsg:
-		m.detailPane.SetOutput("Loading...", fmt.Sprintf("Comparing %s in %s vs %s...", m.diffSecretKey, m.ctx.Environment, msg.Environment), false)
-		return m, m.loadDiff(m.diffSecretKey, msg.Environment)
+		spinCmd := m.detailPane.StartLoading(fmt.Sprintf("Comparing %s in %s vs %s...", m.diffSecretKey, m.ctx.Environment, msg.Environment))
+		return m, tea.Batch(m.loadDiff(m.diffSecretKey, msg.Environment), spinCmd)
 
 	case diffLoadedMsg:
+		m.detailPane.StopLoading()
 		if msg.err != nil {
 			m.detailPane.SetOutput("Diff Error", msg.err.Error(), true)
 		} else {
@@ -429,6 +442,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case propagationLoadedMsg:
+		m.detailPane.StopLoading()
 		if msg.err != nil {
 			m.detailPane.SetOutput("Propagation Error", msg.err.Error(), true)
 		} else {
@@ -459,7 +473,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detailPane.SetOutput("Copy Failed", msg.err.Error(), true)
 			return m, nil
 		}
-		return m, m.loadPropagation(msg.secretKey)
+		spinCmd := m.detailPane.StartLoading(fmt.Sprintf("Refreshing propagation for '%s'...", msg.secretKey))
+		return m, tea.Batch(m.loadPropagation(msg.secretKey), spinCmd)
 
 	case components.DiffCopyRequestMsg:
 		m.pendingDiffCopy = &propagationCopyData{key: msg.Key, value: msg.Value, targetEnv: msg.TargetEnv}
@@ -480,7 +495,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Re-run the same diff so the table reflects the updated values.
 		// envA is always the current env; envB is always the target env.
 		_ = msg.envA
-		return m, m.loadDiff(msg.secretKey, msg.envB)
+		spinCmd := m.detailPane.StartLoading(fmt.Sprintf("Refreshing diff for '%s'...", msg.secretKey))
+		return m, tea.Batch(m.loadDiff(msg.secretKey, msg.envB), spinCmd)
 
 	case components.ConfirmYesMsg:
 		if m.pendingPropagationCopy != nil {
@@ -533,7 +549,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.TargetEnv != "" {
 			m.ctx.Environment = msg.TargetEnv
 			m.updateContextBar()
-			return m, m.loadSecrets
+			spinCmd := m.secretBrowser.StartLoading("Loading " + msg.TargetEnv + " secrets...")
+			return m, tea.Batch(m.loadSecrets, spinCmd)
 		}
 		return m, nil
 
@@ -626,7 +643,8 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.detailPane.ToggleReveal()
 	case "R":
-		return m, m.loadContext
+		spinCmd := m.secretBrowser.StartLoading("Refreshing secrets...")
+		return m, tea.Batch(m.loadContext, spinCmd)
 	case "d":
 		if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
 			m.diffSecretKey = item.KeyName
@@ -635,8 +653,8 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p":
 		if m.focusedPane != PanePrompt {
 			if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
-				m.detailPane.SetOutput("Loading...", fmt.Sprintf("Fetching '%s' across all environments...", item.KeyName), false)
-				return m, m.loadPropagation(item.KeyName)
+				spinCmd := m.detailPane.StartLoading(fmt.Sprintf("Fetching '%s' across all environments...", item.KeyName))
+				return m, tea.Batch(m.loadPropagation(item.KeyName), spinCmd)
 			}
 		}
 	case "ctrl+k":
@@ -709,7 +727,8 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						}
 					}
 					m.updateContextBar()
-					return m, m.loadSecrets
+					spinCmd := m.secretBrowser.StartLoading("Loading secrets...")
+					return m, tea.Batch(m.loadSecrets, spinCmd)
 				}
 				// Find the full secret
 				for _, s := range m.secrets {
@@ -728,7 +747,8 @@ func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focusedPane == PaneSecretBrowser && !m.secretBrowser.IsFiltering() && m.ctx.Path != "/" && m.ctx.Path != "" {
 			m.ctx.Path = parentPath(m.ctx.Path)
 			m.updateContextBar()
-			return m, m.loadSecrets
+			spinCmd := m.secretBrowser.StartLoading("Loading secrets...")
+			return m, tea.Batch(m.loadSecrets, spinCmd)
 		}
 		// Fall through to default to let the list handle backspace (e.g. in filter mode)
 		fallthrough
@@ -828,7 +848,8 @@ func (m *Model) handlePaletteResult(msg components.PaletteResultMsg) (tea.Model,
 	case components.PaletteGoToEnv:
 		m.ctx.Environment = msg.Data
 		m.updateContextBar()
-		return m, m.loadSecrets
+		spinCmd := m.secretBrowser.StartLoading("Loading " + msg.Data + " secrets...")
+		return m, tea.Batch(m.loadSecrets, spinCmd)
 	case components.PaletteCopyCLI:
 		cmd := fmt.Sprintf("infisical secrets --env=%s", m.ctx.Environment)
 		if m.ctx.Path != "" && m.ctx.Path != "/" {
@@ -856,11 +877,13 @@ func (m *Model) handlePaletteResult(msg components.PaletteResultMsg) (tea.Model,
 		m.ctx.Environment = msg.Data
 		m.updateContextBar()
 		m.pendingAction = &PendingAction{Type: PendingOpenSecretForm}
-		return m, m.loadSecrets
+		spinCmd := m.secretBrowser.StartLoading("Loading " + msg.Data + " secrets...")
+		return m, tea.Batch(m.loadSecrets, spinCmd)
 	case components.PaletteNavigatePath:
 		m.ctx.Path = msg.Data
 		m.updateContextBar()
-		return m, m.loadSecrets
+		spinCmd := m.secretBrowser.StartLoading("Loading secrets...")
+		return m, tea.Batch(m.loadSecrets, spinCmd)
 	case components.PaletteDiffEnvs:
 		if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
 			m.diffSecretKey = item.KeyName
@@ -868,8 +891,8 @@ func (m *Model) handlePaletteResult(msg components.PaletteResultMsg) (tea.Model,
 		}
 	case components.PalettePropagation:
 		if item, ok := m.secretBrowser.SelectedItem(); ok && !item.IsFolder {
-			m.detailPane.SetOutput("Loading...", fmt.Sprintf("Fetching '%s' across all environments...", item.KeyName), false)
-			return m, m.loadPropagation(item.KeyName)
+			spinCmd := m.detailPane.StartLoading(fmt.Sprintf("Fetching '%s' across all environments...", item.KeyName))
+			return m, tea.Batch(m.loadPropagation(item.KeyName), spinCmd)
 		}
 	}
 	return m, nil

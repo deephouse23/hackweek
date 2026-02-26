@@ -88,6 +88,8 @@ type NavigationHintMsg struct {
 
 type SecretBrowserModel struct {
 	list         list.Model
+	overlay      OverlayModel
+	IsLoading    bool
 	Active       bool
 	Width        int
 	Height       int
@@ -120,8 +122,23 @@ func NewSecretBrowser() SecretBrowserModel {
 	}
 
 	return SecretBrowserModel{
-		list: l,
+		list:    l,
+		overlay: NewOverlay(),
 	}
+}
+
+// StartLoading sets the browser into a loading state and kicks off the animation.
+func (m *SecretBrowserModel) StartLoading(msg string) tea.Cmd {
+	m.IsLoading = true
+	m.overlay.Width = m.Width
+	m.overlay.Height = m.Height
+	return m.overlay.Show(msg)
+}
+
+// StopLoading clears the loading state.
+func (m *SecretBrowserModel) StopLoading() {
+	m.IsLoading = false
+	m.overlay.Hide()
 }
 
 func (m *SecretBrowserModel) SetSecrets(secrets []SecretItem) {
@@ -163,6 +180,15 @@ func (m SecretBrowserModel) IsFiltering() bool {
 }
 
 func (m SecretBrowserModel) Update(msg tea.Msg) (SecretBrowserModel, tea.Cmd) {
+	// Always handle overlay ticks regardless of active state
+	if m.IsLoading {
+		if _, ok := msg.(LoadingTickMsg); ok {
+			var cmd tea.Cmd
+			m.overlay, cmd = m.overlay.Update(msg)
+			return m, cmd
+		}
+	}
+
 	if !m.Active {
 		return m, nil
 	}
@@ -230,6 +256,12 @@ func (m SecretBrowserModel) View() string {
 	}
 	if m.Height > 0 {
 		style = style.Height(m.Height - 2)
+	}
+
+	if m.IsLoading {
+		m.overlay.Width = m.Width
+		m.overlay.Height = m.Height
+		return style.Render(m.overlay.View())
 	}
 
 	content := m.list.View()
