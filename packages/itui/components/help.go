@@ -166,6 +166,7 @@ func helpContent(innerWidth int) string {
 				{"R", "Refresh secrets"},
 				{"d", "Compare selected secret across envs"},
 				{"p", "View propagation across envs"},
+				{"A", "View access tree (folder permissions)"},
 			},
 		},
 		{

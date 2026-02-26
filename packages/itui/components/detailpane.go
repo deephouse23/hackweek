@@ -153,6 +153,7 @@ func (m *DetailPaneModel) SetSize(width, height int) {
 	m.Height = height
 	m.viewport.Width = width - 4 // border + padding
 	m.viewport.Height = height - 4
+	m.updateViewportContent()
 }
 
 func (m *DetailPaneModel) SetSecret(key, value, secretType, path, comment string) {
@@ -300,18 +301,35 @@ func (m *DetailPaneModel) wrapText(s string) string {
 func (m *DetailPaneModel) renderSecretDetail() string {
 	var b strings.Builder
 
+	vpW := m.viewport.Width
+	if vpW <= 0 {
+		vpW = 40
+	}
+
+	// Label column is fixed; value wraps at the remaining width.
+	const labelW = 12
+	const indent = labelW + 2 // label + "  " spacer
+	valueW := vpW - indent
+	if valueW < 10 {
+		valueW = 10
+	}
+
+	wrapValue := func(s string) string {
+		return wordwrap.String(s, valueW)
+	}
+
 	b.WriteString(dTitleStyle.Render("Secret Detail"))
 	b.WriteString("\n\n")
 
 	b.WriteString(dLabelStyle.Render("Key:"))
 	b.WriteString("  ")
-	b.WriteString(dKeyStyle.Render(m.SecretKey))
+	b.WriteString(dKeyStyle.Render(wrapValue(m.SecretKey)))
 	b.WriteString("\n\n")
 
 	b.WriteString(dLabelStyle.Render("Value:"))
 	b.WriteString("  ")
 	if m.ValueRevealed {
-		b.WriteString(dValueStyle.Render(m.wrapText(m.SecretValue)))
+		b.WriteString(dValueStyle.Render(wrapValue(m.SecretValue)))
 	} else {
 		b.WriteString(dMaskedStyle.Render("••••••••  [press r to reveal]"))
 	}
@@ -330,7 +348,7 @@ func (m *DetailPaneModel) renderSecretDetail() string {
 		b.WriteString("\n\n")
 		b.WriteString(dLabelStyle.Render("Comment:"))
 		b.WriteString("  ")
-		b.WriteString(dValueStyle.Render(m.wrapText(m.SecretComment)))
+		b.WriteString(dValueStyle.Render(wrapValue(m.SecretComment)))
 	}
 
 	return b.String()
@@ -397,14 +415,20 @@ func (m *DetailPaneModel) renderSecretList() string {
 func (m *DetailPaneModel) renderOutput() string {
 	var b strings.Builder
 
+	vpW := m.viewport.Width
+	if vpW <= 0 {
+		vpW = 40
+	}
+
 	title := dTitleStyle.Render(m.OutputTitle)
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
+	wrapped := wordwrap.String(m.OutputContent, vpW)
 	if m.OutputIsError {
-		b.WriteString(dErrorStyle.Render(m.wrapText(m.OutputContent)))
+		b.WriteString(dErrorStyle.Render(wrapped))
 	} else {
-		b.WriteString(dValueStyle.Render(m.wrapText(m.OutputContent)))
+		b.WriteString(dValueStyle.Render(wrapped))
 	}
 
 	return b.String()
